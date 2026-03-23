@@ -1,148 +1,86 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-import pandas as pd
-import altair as alt
-from datetime import datetime
-import re
 
 st.set_page_config(layout="wide")
 
-# SIDEBAR
-st.sidebar.title("Menu")
-modo = st.sidebar.selectbox(
-    "Escolha a análise:",
-    ["Análise de Like Bait"]
-)
+st.title("📊 Letterboxd Analytics")
 
-st.title("Letterboxd Analytics")
+url = st.text_input("Cole a URL do filme (com review):")
 
-url = st.text_input("Cole a URL do review:")
+def extrair_dados(url):
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
 
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.text, "lxml")
 
-# 🔍 EXTRAÇÃO ROBUSTA
-def extrair_review(url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = requests.get(url, headers=headers)
+    # 🎬 Título do filme
+    titulo = soup.select_one("h1.headline-1")
+    titulo = titulo.text.strip() if titulo else "N/A"
 
-    if r.status_code != 200:
-        return None
+    # 👤 Usuário
+    usuario = soup.select_one("a.name")
+    usuario = usuario.text.strip() if usuario else "N/A"
 
-    soup = BeautifulSoup(r.text, "lxml")
+    # ✍️ Texto do review
+    review = soup.select_one("div.review")
+    review_texto = review.get_text(separator=" ").strip() if review else ""
 
-    # TEXTO
-    review = soup.find("div", class_="review")
-    if not review:
-        return None
+    caracteres = len(review_texto)
+    palavras = len(review_texto.split())
+    tempo_leitura = round(palavras / 200, 2) if palavras > 0 else 0
 
-    texto = review.get_text(" ", strip=True)
+    # ❤️ Likes (reviews curtidos)
+    section = soup.select_one("section.liked-reviews")
+    likes = len(section.select("li")) if section else 0
 
-    caracteres = len(texto)
-    palavras = len(texto.split())
+    # 💬 Comentários (estimativa)
+    comentarios = soup.select("div.comment")
+    total_comentarios = len(comentarios)
 
-    tempo_leitura = round(palavras / 200, 2)
-
-    # 🔥 CONTAINER PRINCIPAL
-    container = soup.find("section", class_="film-detail-content")
-
-    likes = 0
-    comentarios = 0
-
-    if container:
-        texto_container = container.get_text(" ", strip=True)
-
-        likes_match = re.search(r"(\d+)\s+likes?", texto_container, re.IGNORECASE)
-        comments_match = re.search(r"(\d+)\s+comments?", texto_container, re.IGNORECASE)
-
-        if likes_match:
-            likes = int(likes_match.group(1))
-
-        if comments_match:
-            comentarios = int(comments_match.group(1))
-
-    # 🔁 FALLBACK
-    if likes == 0:
-        like_span = soup.find("span", class_="like-count")
-        if like_span:
-            try:
-                likes = int(like_span.text.strip())
-            except:
-                pass
-
-    # 👥 LIKES DE AMIGOS (aproximação)
-    friends = soup.select("section.js-liked-by a.avatar")
-    likes_amigos = len(friends)
+    # 📊 Eficiência
+    eficiencia = round(likes / palavras * 100, 2) if palavras > 0 else 0
 
     return {
+        "titulo": titulo,
+        "usuario": usuario,
+        "likes": likes,
+        "comentarios": total_comentarios,
         "caracteres": caracteres,
         "palavras": palavras,
         "tempo": tempo_leitura,
-        "likes": likes,
-        "comentarios": comentarios,
-        "likes_amigos": likes_amigos
+        "eficiencia": eficiencia,
+        "review": review_texto[:500]  # preview
     }
 
 
-# 📊 DADOS PARA GRÁFICO (ESTILO LIMPO)
-def gerar_serie_visual(data):
-    base = max(data["likes"], 1)
-
-    datas = pd.date_range(end=datetime.today(), periods=30)
-
-    valores = [int(base * (0.4 + i/50)) for i in range(30)]
-
-    df = pd.DataFrame({
-        "data": datas,
-        "likes": valores
-    })
-
-    return df
-
-
-# 📈 GRÁFICO ELEGANTE
-def plotar(df):
-    bars = alt.Chart(df).mark_bar().encode(
-        x=alt.X("data:T", title="Tempo"),
-        y=alt.Y("likes:Q", title="Likes"),
-        tooltip=["data", "likes"]
-    )
-
-    line = alt.Chart(df).mark_line(point=True).encode(
-        x="data:T",
-        y="likes:Q"
-    )
-
-    st.altair_chart(bars + line, use_container_width=True)
-
-
-# 🚀 EXECUÇÃO
 if st.button("Analisar"):
+    if url:
+        dados = extrair_dados(url)
 
-    if not url or "/film/" not in url:
-        st.error("Use uma URL de review válida do Letterboxd.")
+        st.subheader(f"🎬 {dados['titulo']}")
+        st.caption(f"por {dados['usuario']}")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        col1.metric("Likes", dados["likes"])
+        col2.metric("Comentários", dados["comentarios"])
+        col3.metric("Palavras", dados["palavras"])
+        col4.metric("Tempo leitura (min)", dados["tempo"])
+
+        st.metric("Eficiência (likes por 100 palavras)", dados["eficiencia"])
+
+        st.subheader("📊 Engajamento")
+
+        st.bar_chart({
+            "Likes": [dados["likes"]],
+            "Comentários": [dados["comentarios"]],
+        })
+
+        st.subheader("📝 Preview do review")
+        st.write(dados["review"])
+
     else:
-        data = extrair_review(url)
-
-        if not data:
-            st.error("Não foi possível extrair dados. Verifique se é um review individual.")
-        else:
-            st.subheader("📊 Análise de Like Bait")
-
-            col1, col2, col3, col4, col5 = st.columns(5)
-
-            col1.metric("Likes", data["likes"])
-            col2.metric("Comentários", data["comentarios"])
-            col3.metric("Likes Amigos", data["likes_amigos"])
-            col4.metric("Caracteres", data["caracteres"])
-            col5.metric("Tempo leitura (min)", data["tempo"])
-
-            eficiencia = 0
-            if data["palavras"] > 0:
-                eficiencia = round((data["likes"] / data["palavras"]) * 100, 2)
-
-            st.metric("Eficiência Like Bait", eficiencia)
-
-            st.subheader("📈 Engajamento")
-
-            df = gerar_serie_visual(data)
-            plotar(df)
+        st.warning("Cole uma URL válida")
