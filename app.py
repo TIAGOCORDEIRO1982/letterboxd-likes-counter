@@ -30,7 +30,7 @@ def get_soup(url):
 
 
 def get_like_review(base_url):
-    # garante /likes/
+    # garante que a URL termine com /
     if not base_url.endswith("/"):
         base_url += "/"
 
@@ -43,8 +43,14 @@ def get_like_review(base_url):
         page_url = likes_url + f"page/{page}/"
         soup = get_soup(page_url)
 
-        users = soup.select("li.poster-container")
+        # Busca as linhas da tabela de usuários na página de likes
+        users = soup.select("table.person-table tbody tr")
+        
+        # Fallback caso o layout seja diferente
+        if not users:
+            users = soup.select(".person-summary")
 
+        # Se não encontrar mais usuários, sai do loop
         if not users:
             break
 
@@ -81,15 +87,16 @@ if st.button("Analisar"):
         st.warning("Cole uma URL válida")
         st.stop()
 
-    soup = get_soup(url)
+    with st.spinner('Analisando os dados do review...'):
+        soup = get_soup(url)
 
-    like_review = get_like_review(url)
-    likes_dados = get_likes_dados(soup)
-    usuario = get_user(soup)
-    texto = get_texto(soup)
+        like_review = get_like_review(url)
+        likes_dados = get_likes_dados(soup)
+        usuario = get_user(soup)
+        texto = get_texto(soup)
 
-    palavras = len(texto.split())
-    tempo = round(palavras / 200, 1) if palavras else 0
+        palavras = len(texto.split())
+        tempo = round(palavras / 200, 1) if palavras else 0
 
     # =========================
     # MÉTRICAS
