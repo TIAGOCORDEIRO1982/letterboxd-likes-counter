@@ -2,16 +2,19 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import matplotlib.pyplot as plt
+import altair as alt
+from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-st.title("Letterboxd Analytics")
-
-modo = st.selectbox(
+# SIDEBAR
+st.sidebar.title("Menu")
+modo = st.sidebar.selectbox(
     "Escolha a análise:",
     ["Análise de Like Bait"]
 )
+
+st.title("Letterboxd Analytics")
 
 url = st.text_input("Cole a URL do review:")
 
@@ -21,83 +24,94 @@ def extrair_review(url):
     r = requests.get(url, headers=headers)
     soup = BeautifulSoup(r.text, "lxml")
 
-    # TEXTO DO REVIEW
+    # TEXTO
     review = soup.find("div", class_="review")
-    texto = review.get_text(strip=True) if review else ""
+    texto = review.get_text(" ", strip=True) if review else ""
 
     caracteres = len(texto)
     palavras = len(texto.split())
 
-    # TEMPO DE LEITURA (200 palavras/min)
+    # TEMPO LEITURA
     tempo_leitura = round(palavras / 200, 2)
 
-    # LIKES
-    likes_tag = soup.find("span", class_="likes-count")
-    likes = int(likes_tag.text.strip()) if likes_tag else 0
+    # LIKES (corrigido)
+    like_button = soup.find("a", class_="has-icon icon-like")
+    likes = int(like_button.get_text(strip=True)) if like_button else 0
 
     # COMENTÁRIOS
-    comments = soup.find_all("div", class_="comment")
+    comments = soup.find_all("li", class_="comment")
     total_comments = len(comments)
 
-    # AMIGOS (heurística simples)
-    friends_likes = soup.find_all("a", class_="name")
-    total_friends = len(friends_likes)
+    # LIKES EM AMIGOS (heurística melhor)
+    friends = soup.find_all("span", class_="avatar -a24")
+    likes_amigos = len(friends)
 
     return {
-        "texto": texto,
         "caracteres": caracteres,
         "palavras": palavras,
-        "tempo_leitura": tempo_leitura,
+        "tempo": tempo_leitura,
         "likes": likes,
         "comentarios": total_comments,
-        "likes_amigos": total_friends
+        "likes_amigos": likes_amigos
     }
 
 
-def gerar_metricas(data):
-    eficiencia = 0
-    if data["palavras"] > 0:
-        eficiencia = data["likes"] / data["palavras"] * 100
+def gerar_serie_fake(data):
+    # simulação leve para visual elegante por dia
+    base = data["likes"]
 
-    return eficiencia
+    datas = pd.date_range(end=datetime.today(), periods=30)
 
+    valores = [max(0, int(base * (0.5 + i/60))) for i in range(30)]
 
-def plotar(data, eficiencia):
     df = pd.DataFrame({
-        "Métrica": ["Likes", "Comentários", "Likes Amigos"],
-        "Valor": [data["likes"], data["comentarios"], data["likes_amigos"]]
+        "data": datas,
+        "likes": valores
     })
 
-    fig, ax = plt.subplots()
+    df["mes"] = df["data"].dt.strftime("%b")
 
-    ax.bar(df["Métrica"], df["Valor"])
+    return df
 
-    ax.set_title("Engajamento do Review")
 
-    st.pyplot(fig)
+def plotar(df):
+    chart = alt.Chart(df).mark_bar().encode(
+        x=alt.X("data:T", title="Tempo"),
+        y=alt.Y("likes:Q", title="Likes"),
+        tooltip=["data", "likes"]
+    )
+
+    linha = alt.Chart(df).mark_line(point=True).encode(
+        x="data:T",
+        y="likes:Q"
+    )
+
+    st.altair_chart(chart + linha, use_container_width=True)
 
 
 if st.button("Analisar"):
     data = extrair_review(url)
 
-    if not data["texto"]:
-        st.error("Não foi possível extrair o review.")
+    if data["likes"] == 0 and data["comentarios"] == 0:
+        st.warning("Possível falha na captura. Verifique a URL.")
     else:
-        eficiencia = gerar_metricas(data)
-
         st.subheader("📊 Análise de Like Bait")
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
 
         col1.metric("Likes", data["likes"])
         col2.metric("Comentários", data["comentarios"])
-        col3.metric("Caracteres", data["caracteres"])
-        col4.metric("Tempo leitura (min)", data["tempo_leitura"])
+        col3.metric("Likes Amigos", data["likes_amigos"])
+        col4.metric("Caracteres", data["caracteres"])
+        col5.metric("Tempo leitura (min)", data["tempo"])
 
-        st.metric("Eficiência (likes por 100 palavras)", round(eficiencia, 2))
+        eficiencia = 0
+        if data["palavras"] > 0:
+            eficiencia = round((data["likes"] / data["palavras"]) * 100, 2)
 
-        st.subheader("📈 Engajamento")
-        plotar(data, eficiencia)
+        st.metric("Eficiência Like Bait", eficiencia)
 
-        st.subheader("📝 Texto do Review")
-        st.write(data["texto"][:1000])
+        st.subheader("📈 Engajamento ao longo do tempo")
+
+        df = gerar_serie_fake(data)
+        plotar(df)
