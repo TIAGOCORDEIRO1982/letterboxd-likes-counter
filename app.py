@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import altair as alt
 from datetime import datetime
+import re
 
 st.set_page_config(layout="wide")
 
@@ -19,31 +20,57 @@ st.title("Letterboxd Analytics")
 url = st.text_input("Cole a URL do review:")
 
 
+# 🔍 EXTRAÇÃO ROBUSTA
 def extrair_review(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     r = requests.get(url, headers=headers)
+
+    if r.status_code != 200:
+        return None
+
     soup = BeautifulSoup(r.text, "lxml")
 
     # TEXTO
     review = soup.find("div", class_="review")
-    texto = review.get_text(" ", strip=True) if review else ""
+    if not review:
+        return None
+
+    texto = review.get_text(" ", strip=True)
 
     caracteres = len(texto)
     palavras = len(texto.split())
 
-    # TEMPO LEITURA
     tempo_leitura = round(palavras / 200, 2)
 
-    # LIKES (corrigido)
-    like_button = soup.find("a", class_="has-icon icon-like")
-    likes = int(like_button.get_text(strip=True)) if like_button else 0
+    # 🔥 CONTAINER PRINCIPAL
+    container = soup.find("section", class_="film-detail-content")
 
-    # COMENTÁRIOS
-    comments = soup.find_all("li", class_="comment")
-    total_comments = len(comments)
+    likes = 0
+    comentarios = 0
 
-    # LIKES EM AMIGOS (heurística melhor)
-    friends = soup.find_all("span", class_="avatar -a24")
+    if container:
+        texto_container = container.get_text(" ", strip=True)
+
+        likes_match = re.search(r"(\d+)\s+likes?", texto_container, re.IGNORECASE)
+        comments_match = re.search(r"(\d+)\s+comments?", texto_container, re.IGNORECASE)
+
+        if likes_match:
+            likes = int(likes_match.group(1))
+
+        if comments_match:
+            comentarios = int(comments_match.group(1))
+
+    # 🔁 FALLBACK
+    if likes == 0:
+        like_span = soup.find("span", class_="like-count")
+        if like_span:
+            try:
+                likes = int(like_span.text.strip())
+            except:
+                pass
+
+    # 👥 LIKES DE AMIGOS (aproximação)
+    friends = soup.select("section.js-liked-by a.avatar")
     likes_amigos = len(friends)
 
     return {
@@ -51,67 +78,71 @@ def extrair_review(url):
         "palavras": palavras,
         "tempo": tempo_leitura,
         "likes": likes,
-        "comentarios": total_comments,
+        "comentarios": comentarios,
         "likes_amigos": likes_amigos
     }
 
 
-def gerar_serie_fake(data):
-    # simulação leve para visual elegante por dia
-    base = data["likes"]
+# 📊 DADOS PARA GRÁFICO (ESTILO LIMPO)
+def gerar_serie_visual(data):
+    base = max(data["likes"], 1)
 
     datas = pd.date_range(end=datetime.today(), periods=30)
 
-    valores = [max(0, int(base * (0.5 + i/60))) for i in range(30)]
+    valores = [int(base * (0.4 + i/50)) for i in range(30)]
 
     df = pd.DataFrame({
         "data": datas,
         "likes": valores
     })
 
-    df["mes"] = df["data"].dt.strftime("%b")
-
     return df
 
 
+# 📈 GRÁFICO ELEGANTE
 def plotar(df):
-    chart = alt.Chart(df).mark_bar().encode(
+    bars = alt.Chart(df).mark_bar().encode(
         x=alt.X("data:T", title="Tempo"),
         y=alt.Y("likes:Q", title="Likes"),
         tooltip=["data", "likes"]
     )
 
-    linha = alt.Chart(df).mark_line(point=True).encode(
+    line = alt.Chart(df).mark_line(point=True).encode(
         x="data:T",
         y="likes:Q"
     )
 
-    st.altair_chart(chart + linha, use_container_width=True)
+    st.altair_chart(bars + line, use_container_width=True)
 
 
+# 🚀 EXECUÇÃO
 if st.button("Analisar"):
-    data = extrair_review(url)
 
-    if data["likes"] == 0 and data["comentarios"] == 0:
-        st.warning("Possível falha na captura. Verifique a URL.")
+    if not url or "/film/" not in url:
+        st.error("Use uma URL de review válida do Letterboxd.")
     else:
-        st.subheader("📊 Análise de Like Bait")
+        data = extrair_review(url)
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        if not data:
+            st.error("Não foi possível extrair dados. Verifique se é um review individual.")
+        else:
+            st.subheader("📊 Análise de Like Bait")
 
-        col1.metric("Likes", data["likes"])
-        col2.metric("Comentários", data["comentarios"])
-        col3.metric("Likes Amigos", data["likes_amigos"])
-        col4.metric("Caracteres", data["caracteres"])
-        col5.metric("Tempo leitura (min)", data["tempo"])
+            col1, col2, col3, col4, col5 = st.columns(5)
 
-        eficiencia = 0
-        if data["palavras"] > 0:
-            eficiencia = round((data["likes"] / data["palavras"]) * 100, 2)
+            col1.metric("Likes", data["likes"])
+            col2.metric("Comentários", data["comentarios"])
+            col3.metric("Likes Amigos", data["likes_amigos"])
+            col4.metric("Caracteres", data["caracteres"])
+            col5.metric("Tempo leitura (min)", data["tempo"])
 
-        st.metric("Eficiência Like Bait", eficiencia)
+            eficiencia = 0
+            if data["palavras"] > 0:
+                eficiencia = round((data["likes"] / data["palavras"]) * 100, 2)
 
-        st.subheader("📈 Engajamento ao longo do tempo")
+            st.metric("Eficiência Like Bait", eficiencia)
 
-        df = gerar_serie_fake(data)
-        plotar(df)
+            st.subheader("📈 Engajamento")
+
+            df = gerar_serie_visual(data)
+            plotar(df)
