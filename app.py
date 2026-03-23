@@ -26,7 +26,7 @@ url = st.text_input("Cole a URL do review:")
 
 def get_soup(url):
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0"
     }
     try:
         response = requests.get(url, headers=headers)
@@ -38,29 +38,24 @@ def get_soup(url):
 
 def get_like_review(soup):
     """
-    Busca o total de likes diretamente na página do review.
-    Procura pelo link que contém 'likes' no href ou texto.
+    Extrai o número de likes do review baseado no texto 'Like review'.
     """
-    # Tenta encontrar pelo seletor de link de contagem que o Letterboxd usa
-    el = soup.select_one("a.count.tooltip[href$='/likes/']")
-    
-    if not el:
-        # Busca alternativa em toda a página por links que terminam em /likes/
-        for a in soup.find_all("a", href=True):
-            if "/likes/" in a['href']:
-                el = a
-                break
+    texto = soup.get_text(" ", strip=True).lower()
 
-    if el:
-        # Extrai apenas os números (remove vírgulas, pontos e textos como 'likes')
-        texto_limpo = el.text.replace(",", "").replace(".", "").strip()
-        numeros = re.findall(r'\d+', texto_limpo)
-        return int(numeros[0]) if numeros else 0
-        
+    match = re.search(r'like review\s+(\d[\d.,]*)', texto)
+
+    if match:
+        numero = match.group(1)
+        numero = numero.replace(",", "").replace(".", "")
+        return int(numero)
+
     return 0
 
 
 def get_likes_dados(soup):
+    """
+    Likes que o usuário deu em outros reviews (visível na página do filme)
+    """
     section = soup.select_one("section.liked-reviews")
     if not section:
         return 0
@@ -93,12 +88,9 @@ if st.button("Analisar"):
 
     with st.spinner('Extraindo dados do Letterboxd...'):
         soup = get_soup(url)
-        
+
         if soup:
-            # Pegamos o dado de likes RECEBIDOS pelo review
             like_review = get_like_review(soup)
-            
-            # Pegamos os dados do autor e texto
             likes_dados = get_likes_dados(soup)
             usuario = get_user(soup)
             texto = get_texto(soup)
@@ -112,12 +104,12 @@ if st.button("Analisar"):
 
             col1, col2, col3 = st.columns(3)
 
-            col1.metric("Like Review (Recebidos)", like_review)
+            col1.metric("Like Review", like_review)
             col2.metric(f"Likes dados em reviews por '{usuario}'", likes_dados)
             col3.metric("Tempo de leitura (min)", tempo)
 
             # =========================
-            # GRÁFICO
+            # GRÁFICO ESTILO REFERÊNCIA
             # =========================
 
             st.markdown("### 📊 Comparação")
@@ -125,17 +117,17 @@ if st.button("Analisar"):
             fig = go.Figure()
 
             fig.add_trace(go.Bar(
-                x=["Likes Recebidos"],
+                x=["Review"],
                 y=[like_review],
-                name="No Review",
-                marker_color="#3b82f6"
+                name="Recebidos",
+                marker_color="#22c1dc"  # azul estilo moderno
             ))
 
             fig.add_trace(go.Bar(
-                x=["Likes Dados"],
+                x=["Review"],
                 y=[likes_dados],
-                name=f"Por {usuario}",
-                marker_color="#f97316"
+                name="Dados",
+                marker_color="#ff7a00"  # laranja estilo referência
             ))
 
             fig.update_layout(
@@ -152,5 +144,6 @@ if st.button("Analisar"):
             )
 
             st.plotly_chart(fig, use_container_width=True)
+
         else:
-            st.error("Não foi possível carregar a página. Verifique sua conexão ou a URL.")
+            st.error("Não foi possível carregar a página.")
