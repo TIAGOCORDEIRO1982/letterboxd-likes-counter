@@ -5,7 +5,10 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
-# MENU
+# =========================
+# MENU LATERAL
+# =========================
+
 st.sidebar.title("Menu")
 opcao = st.sidebar.selectbox(
     "Escolha a análise",
@@ -27,12 +30,27 @@ def get_soup(url):
 
 
 def get_like_review(soup):
-    el = soup.select_one("a[data-track-action='liked']")
+    # tentativa 1 (mais comum)
+    el = soup.select_one("a[href$='/likes/']")
     if el:
-        try:
-            return int(el.text.strip())
-        except:
-            return 0
+        text = el.text.strip()
+        if text.isdigit():
+            return int(text)
+
+    # tentativa 2
+    el = soup.select_one("[data-track-action='liked']")
+    if el:
+        text = el.text.strip()
+        if text.isdigit():
+            return int(text)
+
+    # tentativa 3
+    el = soup.select_one(".like-count")
+    if el:
+        text = el.text.strip()
+        if text.isdigit():
+            return int(text)
+
     return 0
 
 
@@ -74,35 +92,35 @@ if st.button("Analisar"):
     tempo = round(palavras / 200, 1) if palavras else 0
 
     # =========================
-    # METRICS
+    # MÉTRICAS
     # =========================
 
     col1, col2, col3 = st.columns(3)
 
     col1.metric("Like Review", like_review)
-    col2.metric(f"Likes dados em reviews de '{usuario}'", likes_dados)
+    col2.metric(f"Likes dados em reviews por '{usuario}'", likes_dados)
     col3.metric("Tempo de leitura (min)", tempo)
 
     # =========================
-    # GRÁFICO ESTILO PROFISSIONAL
+    # GRÁFICO (ESTILO LIMPO)
     # =========================
 
     st.markdown("### 📊 Comparação")
 
     fig = go.Figure()
 
-    # Azul (referência)
+    # Azul
     fig.add_trace(go.Bar(
         x=["Like Review"],
         y=[like_review],
-        name="Recebidos",
+        name="Recebidos"
     ))
 
-    # Laranja (referência)
+    # Laranja
     fig.add_trace(go.Bar(
         x=["Likes Dados"],
         y=[likes_dados],
-        name="Dados",
+        name="Dados"
     ))
 
     fig.update_layout(
