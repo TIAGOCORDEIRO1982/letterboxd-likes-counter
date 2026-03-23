@@ -2,12 +2,13 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-import re
+import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
+# MENU LATERAL
 st.sidebar.title("Menu")
-analise = st.sidebar.selectbox(
+opcao = st.sidebar.selectbox(
     "Escolha a análise",
     ["Análise de Like Bait"]
 )
@@ -16,98 +17,96 @@ st.title("📊 Letterboxd Analytics")
 
 url = st.text_input("Cole a URL do review:")
 
+# =========================
+# FUNÇÕES DE SCRAPING
+# =========================
 
-def extrair_numero(texto):
-    match = re.search(r"(\d[\d\.,]*)", texto or "")
-    if not match:
+def get_soup(url):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response = requests.get(url, headers=headers)
+    return BeautifulSoup(response.text, "lxml")
+
+
+def get_like_review(soup):
+    # tentativa 1 (mais confiável atualmente)
+    el = soup.select_one("a[data-track-action='liked']")
+    if el and el.text.strip().isdigit():
+        return int(el.text.strip())
+
+    # tentativa 2 (fallback)
+    el = soup.select_one(".like-count")
+    if el and el.text.strip().isdigit():
+        return int(el.text.strip())
+
+    return 0
+
+
+def get_likes_dados(soup):
+    section = soup.select_one("section.liked-reviews")
+    if not section:
         return 0
-    return int(match.group(1).replace(".", "").replace(",", ""))
+    return len(section.select("li"))
 
 
-def extrair_dados(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+def get_user(soup):
+    el = soup.select_one("a.name")
+    return el.text.strip() if el else "Usuário"
 
-    response = requests.get(url, headers=headers, timeout=20)
-    if response.status_code != 200:
-        return None
 
-    soup = BeautifulSoup(response.text, "lxml")
+def get_texto(soup):
+    el = soup.select_one(".review .body-text")
+    return el.text.strip() if el else ""
 
-    titulo = soup.select_one("h1.headline-1")
-    titulo = titulo.get_text(" ", strip=True) if titulo else "N/A"
 
-    usuario = soup.select_one("a.name")
-    usuario = usuario.get_text(" ", strip=True) if usuario else "Usuário"
-
-    review = soup.select_one("div.review")
-    review_texto = review.get_text(" ", strip=True) if review else ""
-
-    palavras = len(review_texto.split())
-    caracteres = len(review_texto)
-    tempo_leitura = round(palavras / 200, 2) if palavras > 0 else 0
-
-    # Likes dados em reviews.
-    liked_reviews_section = soup.select_one("section.liked-reviews")
-    likes_dados = len(liked_reviews_section.select("li")) if liked_reviews_section else 0
-
-    # Tentativa de capturar likes recebidos da review.
-    # Se o HTML não expuser esse número de forma confiável, fica 0.
-    review_section = soup.select_one("section.col-12.review.js-review") or soup.select_one("section.review") or soup
-    likes_recebidos = 0
-    if review_section:
-        texto_secao = review_section.get_text(" ", strip=True)
-        for padrao in [
-            r"(\d[\d\.,]*)\s+likes\b",
-            r"(\d[\d\.,]*)\s+like\b",
-            r"(\d[\d\.,]*)\s+likes?\s+on\s+this\s+review\b",
-        ]:
-            m = re.search(padrao, texto_secao, re.IGNORECASE)
-            if m:
-                likes_recebidos = extrair_numero(m.group(1))
-                break
-
-    eficiencia = round((likes_dados / palavras) * 100, 2) if palavras > 0 else 0
-
-    return {
-        "titulo": titulo,
-        "usuario": usuario,
-        "likes_recebidos": likes_recebidos,
-        "likes_dados": likes_dados,
-        "palavras": palavras,
-        "caracteres": caracteres,
-        "tempo": tempo_leitura,
-        "eficiencia": eficiencia,
-    }
-
+# =========================
+# EXECUÇÃO
+# =========================
 
 if st.button("Analisar"):
-    if url:
-        dados = extrair_dados(url)
 
-        if not dados:
-            st.error("Não foi possível extrair dados. Verifique se a URL é um review válido.")
-        else:
-            st.subheader(f"🎬 {dados['titulo']}")
-            st.caption(f"por {dados['usuario']}")
-
-            st.markdown(f"### 🎯 Like Bait em Reviews dados por **{dados['usuario']}**")
-
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Like Review", dados["likes_recebidos"])
-            col2.metric("Likes dados em reviews", dados["likes_dados"])
-            col3.metric("Tempo de leitura (min)", dados["tempo"])
-
-            st.metric("Eficiência Like Bait (likes dados por 100 palavras)", dados["eficiencia"])
-
-            st.markdown("### 📊 Engajamento")
-
-            df = pd.DataFrame({
-                "Tipo": ["Like Review", "Likes dados em reviews"],
-                "Quantidade": [dados["likes_recebidos"], dados["likes_dados"]],
-            })
-
-            st.bar_chart(df.set_index("Tipo"), use_container_width=True)
-    else:
+    if not url:
         st.warning("Cole uma URL válida")
+        st.stop()
+
+    soup = get_soup(url)
+
+    likes_review = get_like_review(soup)
+    likes_dados = get_likes_dados(soup)
+    usuario = get_user(soup)
+    texto = get_texto(soup)
+
+    palavras = len(texto.split())
+    tempo = round(palavras / 200, 1) if palavras else 0
+
+    # =========================
+    # METRICS
+    # =========================
+
+    col1, col2, col3 = st.columns(3)
+
+    col1.metric("Like Review", likes_review)
+    col2.metric(f"Likes dados em reviews de '{usuario}'", likes_dados)
+    col3.metric("Tempo de leitura (min)", tempo)
+
+    # =========================
+    # GRÁFICO ESTILO REFERÊNCIA
+    # =========================
+
+    st.subheader("📊 Comparação")
+
+    df = pd.DataFrame({
+        "Tipo": ["Like Review", "Likes Dados"],
+        "Valor": [likes_review, likes_dados]
+    })
+
+    fig, ax = plt.subplots()
+
+    ax.bar(
+        df["Tipo"],
+        df["Valor"]
+    )
+
+    ax.set_title("Comparação de Engajamento")
+    ax.set_ylabel("Quantidade")
+
+    st.pyplot(fig)
