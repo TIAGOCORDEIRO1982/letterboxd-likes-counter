@@ -2,12 +2,11 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import plotly.graph_objects as go
-import re
 
 st.set_page_config(layout="wide")
 
 # =========================
-# MENU LATERAL
+# MENU
 # =========================
 
 st.sidebar.title("Menu")
@@ -21,7 +20,7 @@ st.title("📊 Letterboxd Analytics")
 url = st.text_input("Cole a URL do review:")
 
 # =========================
-# SCRAPING
+# HELPERS
 # =========================
 
 def get_soup(url):
@@ -30,14 +29,29 @@ def get_soup(url):
     return BeautifulSoup(response.text, "lxml")
 
 
-def get_like_review(soup):
-    # procura texto "Like review 493 likes"
-    for text in soup.stripped_strings:
-        if "like review" in text.lower():
-            match = re.search(r"\d+", text)
-            if match:
-                return int(match.group())
-    return 0
+def get_like_review(base_url):
+    # garante /likes/
+    if not base_url.endswith("/"):
+        base_url += "/"
+
+    likes_url = base_url + "likes/"
+
+    total = 0
+    page = 1
+
+    while True:
+        page_url = likes_url + f"page/{page}/"
+        soup = get_soup(page_url)
+
+        users = soup.select("li.poster-container")
+
+        if not users:
+            break
+
+        total += len(users)
+        page += 1
+
+    return total
 
 
 def get_likes_dados(soup):
@@ -69,7 +83,7 @@ if st.button("Analisar"):
 
     soup = get_soup(url)
 
-    like_review = get_like_review(soup)
+    like_review = get_like_review(url)
     likes_dados = get_likes_dados(soup)
     usuario = get_user(soup)
     texto = get_texto(soup)
@@ -88,7 +102,7 @@ if st.button("Analisar"):
     col3.metric("Tempo de leitura (min)", tempo)
 
     # =========================
-    # GRÁFICO (ESTILO REFERÊNCIA)
+    # GRÁFICO
     # =========================
 
     st.markdown("### 📊 Comparação")
@@ -99,14 +113,14 @@ if st.button("Analisar"):
         x=["Like Review"],
         y=[like_review],
         name="Recebidos",
-        marker_color="#3b82f6"  # azul
+        marker_color="#3b82f6"
     ))
 
     fig.add_trace(go.Bar(
         x=["Likes Dados"],
         y=[likes_dados],
         name="Dados",
-        marker_color="#f97316"  # laranja
+        marker_color="#f97316"
     ))
 
     fig.update_layout(
