@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import plotly.graph_objects as go
+import re
 
 st.set_page_config(layout="wide")
 
@@ -30,27 +31,12 @@ def get_soup(url):
 
 
 def get_like_review(soup):
-    # tentativa 1 (mais comum)
-    el = soup.select_one("a[href$='/likes/']")
-    if el:
-        text = el.text.strip()
-        if text.isdigit():
-            return int(text)
-
-    # tentativa 2
-    el = soup.select_one("[data-track-action='liked']")
-    if el:
-        text = el.text.strip()
-        if text.isdigit():
-            return int(text)
-
-    # tentativa 3
-    el = soup.select_one(".like-count")
-    if el:
-        text = el.text.strip()
-        if text.isdigit():
-            return int(text)
-
+    # procura texto "Like review 493 likes"
+    for text in soup.stripped_strings:
+        if "like review" in text.lower():
+            match = re.search(r"\d+", text)
+            if match:
+                return int(match.group())
     return 0
 
 
@@ -102,25 +88,25 @@ if st.button("Analisar"):
     col3.metric("Tempo de leitura (min)", tempo)
 
     # =========================
-    # GRÁFICO (ESTILO LIMPO)
+    # GRÁFICO (ESTILO REFERÊNCIA)
     # =========================
 
     st.markdown("### 📊 Comparação")
 
     fig = go.Figure()
 
-    # Azul
     fig.add_trace(go.Bar(
         x=["Like Review"],
         y=[like_review],
-        name="Recebidos"
+        name="Recebidos",
+        marker_color="#3b82f6"  # azul
     ))
 
-    # Laranja
     fig.add_trace(go.Bar(
         x=["Likes Dados"],
         y=[likes_dados],
-        name="Dados"
+        name="Dados",
+        marker_color="#f97316"  # laranja
     ))
 
     fig.update_layout(
