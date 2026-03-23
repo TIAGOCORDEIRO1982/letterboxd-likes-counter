@@ -1,33 +1,63 @@
 import streamlit as st
-import requests
-from bs4 import BeautifulSoup
 
-st.title("Contador de Likes no Letterboxd")
+st.set_page_config(page_title="Letterboxd Analytics", layout="wide")
 
-url = st.text_input("Cole a URL do filme:")
+st.title("Letterboxd Analytics")
 
-def contar_likes(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+modo = st.sidebar.selectbox(
+    "Escolha a análise:",
+    [
+        "Contagem simples",
+        "Análise por sessões (activity)"
+    ]
+)
 
-    response = requests.get(url, headers=headers)
+# -------------------------
+# MODO 1
+# -------------------------
+if modo == "Contagem simples":
 
-    soup = BeautifulSoup(response.text, "lxml")
+    import requests
+    from bs4 import BeautifulSoup
 
-    section = soup.select_one("section.liked-reviews")
+    st.header("Contador de Likes")
 
-    if not section:
-        return 0
+    url = st.text_input("URL do filme:")
 
-    li_elements = section.select("li")
+    def contar_likes(url):
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(url, headers=headers)
+        soup = BeautifulSoup(r.text, "lxml")
 
-    return len(li_elements)
+        section = soup.select_one("section.liked-reviews")
+        if not section:
+            return 0
 
+        return len(section.select("li"))
 
-if st.button("Contar"):
-    if url:
+    if st.button("Contar"):
         total = contar_likes(url)
         st.success(f"Total: {total}")
-    else:
-        st.warning("Cole uma URL")
+
+
+# -------------------------
+# MODO 2 (AVISO)
+# -------------------------
+elif modo == "Análise por sessões (activity)":
+
+    st.header("Análise de Likes por Sessão")
+
+    st.warning("""
+    ⚠️ Esta função não funciona online.
+
+    Motivo:
+    A página /activity do Letterboxd carrega via JavaScript
+    e exige Selenium (Chrome), que não roda no Streamlit Cloud.
+
+    👉 Para usar essa função:
+    rode o app LOCALMENTE no seu computador.
+    """)
+
+    st.info("""
+    Em breve: versão sem Selenium (mais avançada)
+    """)
