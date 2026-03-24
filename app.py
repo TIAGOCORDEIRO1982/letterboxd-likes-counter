@@ -12,28 +12,21 @@ HEADERS = {
 }
 
 # =========================
-# DEBUG
-# =========================
-
-DEBUG = st.sidebar.checkbox("Modo Debug")
-
-def debug_log(msg):
-    if DEBUG:
-        st.sidebar.write(msg)
-
-
-# =========================
-# PEGAR HTML
+# FETCH (CACHE AQUI SOMENTE)
 # =========================
 
 @st.cache_data
-def get_soup(url):
+def fetch_html(url):
     response = requests.get(url, headers=HEADERS, timeout=10)
-    return BeautifulSoup(response.text, "html.parser")
+    return response.text
+
+
+def get_soup(html):
+    return BeautifulSoup(html, "html.parser")
 
 
 # =========================
-# DETECTAR REVIEW (ROBUSTO)
+# PARSING
 # =========================
 
 def get_review_element(soup):
@@ -52,50 +45,11 @@ def get_review_element(soup):
     return None, None
 
 
-# =========================
-# EXTRAIR LIKES (ROBUSTO)
-# =========================
-
-@st.cache_data
-def get_total_likes(url):
-    try:
-        if not url.endswith('/'):
-            url += '/'
-
-        likes_url = url + "likes/"
-
-        response = requests.get(likes_url, headers=HEADERS, timeout=10)
-
-        if response.status_code != 200:
-            return 0, "status_error"
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # tentativa 1: texto
-        text = soup.get_text(" ", strip=True)
-
-        match = re.search(r'(\d+)', text)
-        if match:
-            value = int(match.group(1))
-            if value < 10000:
-                return value, "regex"
-
-        # tentativa 2: contar usuários
-        users = soup.select("li.poster-container")
-        if users:
-            return len(users), "count"
-
-        return 0, "not_found"
-
-    except:
-        return 0, "exception"
+def get_username(soup):
+    user = soup.select_one("a.name")
+    return user.get_text().strip() if user else "Desconhecido"
 
 
-# =========================
-# OUTROS DADOS
-# =========================
-
-@st.cache_data
 def get_likes_given(soup):
     liked = soup.select("section.liked-reviews li")
     return len(liked)
@@ -106,10 +60,40 @@ def get_reading_time(review_element):
     return round(words / 200, 1)
 
 
-def get_username(soup):
-    user = soup.select_one("a.name")
-    return user.get_text().strip() if user else "Desconhecido"
+# =========================
+# LIKES (SEPARADO)
+# =========================
 
+@st.cache_data
+def get_likes_html(url):
+    if not url.endswith("/"):
+        url += "/"
+    likes_url = url + "likes/"
+    response = requests.get(likes_url, headers=HEADERS, timeout=10)
+    return response.text
+
+
+def parse_likes(html):
+    soup = BeautifulSoup(html, "html.parser")
+
+    text = soup.get_text(" ", strip=True)
+
+    match = re.search(r'(\d+)', text)
+    if match:
+        value = int(match.group(1))
+        if value < 10000:
+            return value, "regex"
+
+    users = soup.select("li.poster-container")
+    if users:
+        return len(users), "count"
+
+    return 0, "fallback"
+
+
+# =========================
+# SCORE
+# =========================
 
 def calculate_score(recebidos, dados):
     if dados == 0:
@@ -123,6 +107,8 @@ def calculate_score(recebidos, dados):
 
 st.title("📊 Letterboxd Analytics")
 
+DEBUG = st.sidebar.checkbox("Modo Debug")
+
 url = st.text_input("Cole a URL do Letterboxd:")
 
 if st.button("Analisar"):
@@ -133,37 +119,31 @@ if st.button("Analisar"):
 
     st.info("Carregando página...")
 
-    soup = get_soup(url)
-
-    # =========================
-    # DETECTAR REVIEW
-    # =========================
+    html = fetch_html(url)
+    soup = get_soup(html)
 
     review_element, selector_used = get_review_element(soup)
 
     if not review_element:
-        st.error("❌ Não foi possível encontrar conteúdo de review nessa página")
-        
-        if DEBUG:
-            st.write("HTML parcial:")
-            st.code(str(soup)[:2000])
-
+        st.error("❌ Não foi possível identificar um review nessa página")
         st.stop()
 
     st.success(f"✅ Review detectado ({selector_used})")
 
     # =========================
-    # EXTRAIR DADOS
+    # DADOS
     # =========================
 
-    likes_recebidos, metodo = get_total_likes(url)
+    likes_html = get_likes_html(url)
+    likes_recebidos, metodo = parse_likes(likes_html)
+
     likes_dados = get_likes_given(soup)
     tempo = get_reading_time(review_element)
     usuario = get_username(soup)
     score = calculate_score(likes_recebidos, likes_dados)
 
     # =========================
-    # DEBUG INFO
+    # DEBUG
     # =========================
 
     if DEBUG:
