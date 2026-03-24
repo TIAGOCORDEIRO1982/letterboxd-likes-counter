@@ -4,13 +4,32 @@ from bs4 import BeautifulSoup
 import plotly.graph_objects as go
 from collections import Counter
 import re
+import math
 
 st.set_page_config(layout="wide")
+
+# =========================
+# CONFIG
+# =========================
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
     "Accept-Language": "en-US,en;q=0.9"
 }
+
+# =========================
+# MENU
+# =========================
+
+st.sidebar.title("Menu")
+
+opcao = st.sidebar.selectbox(
+    "Escolha a análise",
+    [
+        "Análise de Review",
+        "Em breve"
+    ]
+)
 
 # =========================
 # FETCH
@@ -79,32 +98,48 @@ def get_top_words(text, n=12):
 
 
 # =========================
-# BUBBLE WORD CHART
+# BUBBLE CHART REFINADO
 # =========================
 
 def create_bubble_chart(word_counts):
     words = [w for w, _ in word_counts]
     values = [v for _, v in word_counts]
 
-    # posições fixas (layout bonito e estável)
-    x = [0,1,2,0,1,2,0.5,1.5,0.5,1.5,1,1]
-    y = [0,0,0,1,1,1,2,2,3,3,4,2]
+    max_val = max(values)
+    sizes = [40 + (v / max_val) * 120 for v in values]
 
-    sizes = [v * 30 for v in values]
+    x = [0]
+    y = [0]
+
+    for i in range(1, len(words)):
+        angle = i * (2 * math.pi / (len(words) - 1))
+        radius = 1.5 + (i % 3) * 0.5
+        x.append(math.cos(angle) * radius)
+        y.append(math.sin(angle) * radius)
+
+    colors = [
+        "#A78BFA", "#60A5FA", "#34D399",
+        "#FBBF24", "#F87171", "#F472B6",
+        "#38BDF8", "#818CF8", "#4ADE80",
+        "#FB923C", "#C084FC", "#22D3EE"
+    ]
 
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
-        x=x[:len(words)],
-        y=y[:len(words)],
+        x=x,
+        y=y,
         mode='markers+text',
         text=words,
         textposition="middle center",
         marker=dict(
             size=sizes,
-            color=values,
-            colorscale='Pastel',
+            color=colors[:len(words)],
             line=dict(width=0)
+        ),
+        textfont=dict(
+            size=14,
+            color="white"
         ),
         hoverinfo='text'
     ))
@@ -114,7 +149,8 @@ def create_bubble_chart(word_counts):
         xaxis=dict(visible=False),
         yaxis=dict(visible=False),
         showlegend=False,
-        height=500
+        height=550,
+        margin=dict(l=0, r=0, t=20, b=0)
     )
 
     return fig
@@ -177,72 +213,92 @@ def extract_star_distribution(liked_elements):
 
 
 # =========================
-# UI
+# PÁGINA: ANÁLISE DE REVIEW
 # =========================
 
-st.title("📊 Letterboxd Review Analyzer")
+if opcao == "Análise de Review":
 
-url = st.text_input("Cole a URL do Letterboxd:")
+    st.title("📊 Letterboxd Review Analyzer")
 
-if st.button("Analisar"):
+    url = st.text_input("Cole a URL do Letterboxd:")
 
-    if not url:
-        st.warning("Insira uma URL válida")
-        st.stop()
+    if st.button("Analisar"):
 
-    html = fetch_html(url)
-    soup = get_soup(html)
+        if not url:
+            st.warning("Insira uma URL válida")
+            st.stop()
 
-    review_element = get_review_element(soup)
+        html = fetch_html(url)
+        soup = get_soup(html)
 
-    if not review_element:
-        st.error("❌ Review não encontrado")
-        st.stop()
+        review_element = get_review_element(soup)
 
-    usuario = get_username(soup)
-    likes_dados = get_likes_given(soup)
-    liked_elements = get_liked_elements(soup)
+        if not review_element:
+            st.error("❌ Review não encontrado")
+            st.stop()
 
-    analysis = analyze_text(review_element)
-    tipo = classify_review(analysis["word_count"])
+        usuario = get_username(soup)
+        likes_dados = get_likes_given(soup)
+        liked_elements = get_liked_elements(soup)
 
-    # =========================
-    # MÉTRICAS
-    # =========================
+        analysis = analyze_text(review_element)
+        tipo = classify_review(analysis["word_count"])
 
-    col1, col2, col3, col4 = st.columns(4)
+        # =========================
+        # MÉTRICAS
+        # =========================
 
-    col1.metric("Palavras", analysis["word_count"])
-    col2.metric("Tempo leitura", analysis["reading_time"])
-    col3.metric("Likes dados", likes_dados)
-    col4.metric("Tipo", tipo)
+        col1, col2, col3, col4 = st.columns(4)
 
-    # =========================
-    # BUBBLE WORD CLOUD
-    # =========================
+        col1.metric("Palavras", analysis["word_count"])
+        col2.metric("Tempo leitura", analysis["reading_time"])
+        col3.metric("Likes dados", likes_dados)
+        col4.metric("Tipo", tipo)
 
-    st.subheader("☁️ Nuvem de palavras")
+        # =========================
+        # TEXTO
+        # =========================
 
-    top_words = get_top_words(analysis["text"])
-    fig_wc = create_bubble_chart(top_words)
+        st.subheader("📋 Estrutura do texto")
 
-    st.plotly_chart(fig_wc, use_container_width=True)
+        st.write(f"Sentenças: {analysis['sentences']}")
+        st.write(f"Média por frase: {analysis['avg_sentence']}")
 
-    # =========================
-    # ESTRELAS
-    # =========================
+        # =========================
+        # BUBBLE WORD CLOUD
+        # =========================
 
-    st.subheader("⭐ Distribuição de avaliações dos likes")
+        st.subheader("☁️ Nuvem de palavras")
 
-    dist = extract_star_distribution(liked_elements)
+        top_words = get_top_words(analysis["text"])
+        fig_wc = create_bubble_chart(top_words)
 
-    fig = go.Figure()
+        st.plotly_chart(fig_wc, use_container_width=True)
 
-    fig.add_trace(go.Bar(
-        x=[f"{k}⭐" for k in dist.keys()],
-        y=list(dist.values())
-    ))
+        # =========================
+        # ESTRELAS
+        # =========================
 
-    fig.update_layout(template="plotly_dark")
+        st.subheader("⭐ Distribuição de avaliações dos likes")
 
-    st.plotly_chart(fig, use_container_width=True)
+        dist = extract_star_distribution(liked_elements)
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=[f"{k}⭐" for k in dist.keys()],
+            y=list(dist.values())
+        ))
+
+        fig.update_layout(template="plotly_dark")
+
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# =========================
+# PLACEHOLDER FUTURO
+# =========================
+
+elif opcao == "Em breve":
+    st.title("🚧 Em breve")
+    st.write("Novas análises serão adicionadas aqui.")
