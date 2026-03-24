@@ -2,8 +2,8 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import plotly.graph_objects as go
-from wordcloud import WordCloud
-import matplotlib.pyplot as plt
+from collections import Counter
+import re
 
 st.set_page_config(layout="wide")
 
@@ -27,7 +27,7 @@ def get_soup(html):
 
 
 # =========================
-# REVIEW
+# PARSING
 # =========================
 
 def get_review_element(soup):
@@ -46,34 +46,119 @@ def get_username(soup):
     return user.get_text().strip() if user else "Desconhecido"
 
 
-def get_likes_given_elements(soup):
+def get_likes_given(soup):
+    return len(soup.select("section.liked-reviews li"))
+
+
+def get_liked_elements(soup):
     return soup.select("section.liked-reviews li")
 
 
 # =========================
-# WORD CLOUD
+# TEXTO
 # =========================
 
-def generate_wordcloud(text):
-    wc = WordCloud(
-        width=800,
-        height=400,
-        background_color="black"
-    ).generate(text)
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)
 
-    fig, ax = plt.subplots()
-    ax.imshow(wc, interpolation="bilinear")
-    ax.axis("off")
+    stopwords = {
+        "the","a","and","to","of","in","is","it","that","this","for","on",
+        "com","de","da","do","e","o","a","que","um","uma","em"
+    }
+
+    words = [w for w in text.split() if w not in stopwords and len(w) > 3]
+
+    return words
+
+
+def get_top_words(text, n=12):
+    words = clean_text(text)
+    counts = Counter(words)
+    return counts.most_common(n)
+
+
+# =========================
+# BUBBLE WORD CHART
+# =========================
+
+def create_bubble_chart(word_counts):
+    words = [w for w, _ in word_counts]
+    values = [v for _, v in word_counts]
+
+    # posições fixas (layout bonito e estável)
+    x = [0,1,2,0,1,2,0.5,1.5,0.5,1.5,1,1]
+    y = [0,0,0,1,1,1,2,2,3,3,4,2]
+
+    sizes = [v * 30 for v in values]
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=x[:len(words)],
+        y=y[:len(words)],
+        mode='markers+text',
+        text=words,
+        textposition="middle center",
+        marker=dict(
+            size=sizes,
+            color=values,
+            colorscale='Pastel',
+            line=dict(width=0)
+        ),
+        hoverinfo='text'
+    ))
+
+    fig.update_layout(
+        template="plotly_dark",
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        showlegend=False,
+        height=500
+    )
 
     return fig
 
 
 # =========================
-# EXTRAIR ESTRELAS
+# ANÁLISE DE TEXTO
+# =========================
+
+def analyze_text(review_element):
+    text = review_element.get_text()
+
+    words = text.split()
+    word_count = len(words)
+
+    sentences = text.count('.') + text.count('!') + text.count('?')
+    sentences = max(sentences, 1)
+
+    avg_words = round(word_count / sentences, 1)
+    reading_time = round(word_count / 200, 1)
+
+    return {
+        "text": text,
+        "word_count": word_count,
+        "sentences": sentences,
+        "avg_sentence": avg_words,
+        "reading_time": reading_time
+    }
+
+
+def classify_review(word_count):
+    if word_count < 80:
+        return "Curto"
+    elif word_count < 250:
+        return "Médio"
+    return "Longo"
+
+
+# =========================
+# ESTRELAS
 # =========================
 
 def extract_star_distribution(liked_elements):
-    distribution = {1:0, 2:0, 3:0, 4:0, 5:0}
+    dist = {1:0,2:0,3:0,4:0,5:0}
 
     for item in liked_elements:
         classes = item.get("class", [])
@@ -82,24 +167,20 @@ def extract_star_distribution(liked_elements):
             if "rated-" in c:
                 try:
                     rating = int(c.replace("rated-", ""))
-                    
-                    # converter escala (ex: 80 → 4 estrelas)
                     stars = rating // 20
-                    
-                    if stars in distribution:
-                        distribution[stars] += 1
-
+                    if stars in dist:
+                        dist[stars] += 1
                 except:
                     pass
 
-    return distribution
+    return dist
 
 
 # =========================
 # UI
 # =========================
 
-st.title("📊 Letterboxd Analyzer")
+st.title("📊 Letterboxd Review Analyzer")
 
 url = st.text_input("Cole a URL do Letterboxd:")
 
@@ -115,39 +196,51 @@ if st.button("Analisar"):
     review_element = get_review_element(soup)
 
     if not review_element:
-        st.error("❌ Não foi possível identificar um review nessa página")
+        st.error("❌ Review não encontrado")
         st.stop()
 
     usuario = get_username(soup)
-    liked_elements = get_likes_given_elements(soup)
+    likes_dados = get_likes_given(soup)
+    liked_elements = get_liked_elements(soup)
+
+    analysis = analyze_text(review_element)
+    tipo = classify_review(analysis["word_count"])
 
     # =========================
-    # WORD CLOUD
+    # MÉTRICAS
+    # =========================
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Palavras", analysis["word_count"])
+    col2.metric("Tempo leitura", analysis["reading_time"])
+    col3.metric("Likes dados", likes_dados)
+    col4.metric("Tipo", tipo)
+
+    # =========================
+    # BUBBLE WORD CLOUD
     # =========================
 
     st.subheader("☁️ Nuvem de palavras")
 
-    text = review_element.get_text()
-    fig_wc = generate_wordcloud(text)
+    top_words = get_top_words(analysis["text"])
+    fig_wc = create_bubble_chart(top_words)
 
-    st.pyplot(fig_wc)
+    st.plotly_chart(fig_wc, use_container_width=True)
 
     # =========================
-    # GRÁFICO DE ESTRELAS
+    # ESTRELAS
     # =========================
 
     st.subheader("⭐ Distribuição de avaliações dos likes")
 
-    distribution = extract_star_distribution(liked_elements)
-
-    stars = list(distribution.keys())
-    values = list(distribution.values())
+    dist = extract_star_distribution(liked_elements)
 
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
-        x=[f"{s}⭐" for s in stars],
-        y=values
+        x=[f"{k}⭐" for k in dist.keys()],
+        y=list(dist.values())
     ))
 
     fig.update_layout(template="plotly_dark")
