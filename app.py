@@ -108,7 +108,6 @@ def create_bubble_chart(word_counts):
     y = [0]
 
     n = len(words) - 1
-
     angle_step = 2 * math.pi / n if n > 0 else 0
     base_radius = radii[0] + max(radii[1:], default=0) + gap
 
@@ -178,55 +177,6 @@ def classify_review(word_count):
 
 
 # =========================
-# LIKE BAIT (NOVO)
-# =========================
-
-def extract_username_from_url(url):
-    try:
-        return url.split("letterboxd.com/")[1].split("/")[0]
-    except:
-        return None
-
-
-def get_profile_likes(username, max_pages=3):
-    total = 0
-    recent = 0
-
-    for page in range(1, max_pages + 1):
-        url = f"https://letterboxd.com/{username}/likes/page/{page}/"
-        html = fetch_html(url)
-        soup = get_soup(html)
-
-        items = soup.select("li.poster-container")
-
-        if not items:
-            break
-
-        if page == 1:
-            recent = len(items)
-
-        total += len(items)
-
-    return total, recent
-
-
-def calculate_like_bait_score(total_likes, recent_likes):
-    A = min(total_likes / 300, 1) * 10
-    B = min(recent_likes / 24, 1) * 10
-    return round((A + B) / 2, 1)
-
-
-def classify_score(score):
-    if score < 4:
-        return "Baixo"
-    elif score < 7:
-        return "Moderado"
-    elif score < 9:
-        return "Alto"
-    return "Muito Alto"
-
-
-# =========================
 # UI
 # =========================
 
@@ -276,36 +226,6 @@ if opcao == "Análise de Review":
         st.subheader("☁️ Nuvem de palavras")
         fig_wc = create_bubble_chart(get_top_words(analysis["text"]))
         st.plotly_chart(fig_wc, use_container_width=True)
-
-        # =========================
-        # LIKE BAIT ANALYSIS
-        # =========================
-
-        st.markdown("---")
-        st.subheader("🚨 Análise de Engajamento")
-
-        username = extract_username_from_url(url)
-
-        if username:
-
-            with st.spinner("Analisando perfil..."):
-
-                total_likes, recent_likes = get_profile_likes(username)
-                score = calculate_like_bait_score(total_likes, recent_likes)
-                classificacao = classify_score(score)
-
-            colA, colB, colC = st.columns(3)
-
-            colA.metric("Likes dados (estimado)", total_likes)
-            colB.metric("Likes recentes", recent_likes)
-            colC.metric("Score", f"{score}/10")
-
-            st.markdown("### 🧠 Interpretação")
-            st.write("Alto volume de distribuição de likes")
-            st.write("Atividade recente concentrada em interação")
-
-            st.markdown("## 🚨 Veredito")
-            st.success(f"Classificação: {classificacao}")
 
 
 elif opcao == "Em breve":
