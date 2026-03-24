@@ -10,8 +10,7 @@ import random
 st.set_page_config(layout="wide")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0",
-    "Accept-Language": "en-US,en;q=0.9"
+    "User-Agent": "Mozilla/5.0"
 }
 
 # =========================
@@ -41,8 +40,7 @@ def get_soup(html):
 # =========================
 
 def get_review_element(soup):
-    selectors = [".review-body", ".body-text", ".review", ".truncate"]
-    for s in selectors:
+    for s in [".review-body", ".body-text", ".review"]:
         el = soup.select_one(s)
         if el and len(el.get_text(strip=True)) > 80:
             return el
@@ -74,12 +72,39 @@ def get_top_words(text, n=12):
     return Counter(clean_text(text)).most_common(n)
 
 # =========================
-# FORCE LAYOUT (CORRIGIDO)
+# CLUSTER SEMÂNTICO SIMPLES
+# =========================
+
+def classify_word_group(word):
+
+    cinema = {"filme","cinema","diretor","ator","roteiro"}
+    tempo = {"tempo","memoria","historia","passado","momento"}
+    opiniao = {"acho","parece","sinto","gosto","melhor"}
+    
+    if word in cinema:
+        return "cinema"
+    elif word in tempo:
+        return "tempo"
+    elif word in opiniao:
+        return "opiniao"
+    else:
+        return "outro"
+
+def get_color(group):
+    palette = {
+        "cinema": "#60A5FA",
+        "tempo": "#34D399",
+        "opiniao": "#FBBF24",
+        "outro": "#A78BFA"
+    }
+    return palette.get(group, "#A78BFA")
+
+# =========================
+# FORCE LAYOUT + ANIMAÇÃO
 # =========================
 
 def create_bubble_chart(word_counts):
 
-    # ordenar por tamanho
     word_counts = sorted(word_counts, key=lambda x: x[1], reverse=True)
 
     words = [w for w, _ in word_counts]
@@ -92,14 +117,14 @@ def create_bubble_chart(word_counts):
 
     n = len(words)
 
-    # posições iniciais (todas no centro)
     x = [random.uniform(-0.1, 0.1) for _ in range(n)]
     y = [random.uniform(-0.1, 0.1) for _ in range(n)]
 
-    gap = 5
+    gap = 6
 
-    # simulação
-    for _ in range(200):
+    frames = []
+
+    for step in range(60):
 
         for i in range(n):
             for j in range(i + 1, n):
@@ -112,44 +137,39 @@ def create_bubble_chart(word_counts):
 
                 if dist < min_dist:
                     force = (min_dist - dist) / dist * 0.5
-
                     x[i] -= dx * force
                     y[i] -= dy * force
                     x[j] += dx * force
                     y[j] += dy * force
 
-        # força de centralização
-        for i in range(1, n):  # mantém a maior fixa no centro
+        # atração ao centro
+        for i in range(1, n):
             x[i] += (-x[i]) * 0.05
             y[i] += (-y[i]) * 0.05
 
-    # maior bolha fixa
-    x[0], y[0] = 0, 0
+        x[0], y[0] = 0, 0  # fixa maior
+
+        frames.append(go.Frame(data=[go.Scatter(
+            x=x,
+            y=y
+        )]))
 
     labels = [f"{w}<br>{v}x" for w, v in word_counts]
 
-    colors = [
-        "#A78BFA","#60A5FA","#34D399","#FBBF24",
-        "#F87171","#F472B6","#38BDF8","#818CF8",
-        "#4ADE80","#FB923C","#C084FC","#22D3EE"
-    ]
+    colors = [get_color(classify_word_group(w)) for w in words]
 
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=x,
-        y=y,
-        mode='markers+text',
-        text=labels,
-        textposition="middle center",
-        marker=dict(
-            size=sizes,
-            color=colors[:len(words)],
-            line=dict(width=0)
-        ),
-        textfont=dict(size=13, color="white"),
-        hoverinfo="text"
-    ))
+    fig = go.Figure(
+        data=[go.Scatter(
+            x=x,
+            y=y,
+            mode='markers+text',
+            text=labels,
+            textposition="middle center",
+            marker=dict(size=sizes, color=colors),
+            textfont=dict(color="white")
+        )],
+        frames=frames
+    )
 
     fig.update_layout(
         template="plotly_dark",
