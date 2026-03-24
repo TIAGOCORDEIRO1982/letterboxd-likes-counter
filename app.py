@@ -7,167 +7,113 @@ import plotly.graph_objects as go
 st.set_page_config(layout="wide")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    "User-Agent": "Mozilla/5.0",
+    "Accept-Language": "en-US,en;q=0.9"
 }
 
 # =========================
-# EXTRAIR REVIEW DO FILM
+# DEBUG
+# =========================
+
+DEBUG = st.sidebar.checkbox("Modo Debug")
+
+def debug_log(msg):
+    if DEBUG:
+        st.sidebar.write(msg)
+
+
+# =========================
+# PEGAR HTML
 # =========================
 
 @st.cache_data
-def extract_review_from_film(film_url):
+def get_soup(url):
+    response = requests.get(url, headers=HEADERS, timeout=10)
+    return BeautifulSoup(response.text, "html.parser")
+
+
+# =========================
+# DETECTAR REVIEW (ROBUSTO)
+# =========================
+
+def get_review_element(soup):
+    selectors = [
+        ".review-body",
+        ".body-text",
+        ".review",
+        ".truncate"
+    ]
+
+    for selector in selectors:
+        el = soup.select_one(selector)
+        if el and len(el.get_text(strip=True)) > 80:
+            return el, selector
+
+    return None, None
+
+
+# =========================
+# EXTRAIR LIKES (ROBUSTO)
+# =========================
+
+@st.cache_data
+def get_total_likes(url):
     try:
-        if not film_url.endswith('/'):
-            film_url += '/'
+        if not url.endswith('/'):
+            url += '/'
 
-        reviews_url = film_url + "reviews/"
+        likes_url = url + "likes/"
 
-        response = requests.get(reviews_url, headers=HEADERS, timeout=10)
+        response = requests.get(likes_url, headers=HEADERS, timeout=10)
 
         if response.status_code != 200:
-            return None
+            return 0, "status_error"
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        review = soup.select_one('a[href*="/review/"]')
-
-        if review:
-            return "https://letterboxd.com" + review["href"]
-
-        return None
-
-    except:
-        return None
-
-
-# =========================
-# VALIDAR / NORMALIZAR URL
-# =========================
-
-@st.cache_data
-def resolve_review_url(url):
-    if "/review/" in url:
-        return url
-
-    review = extract_review_from_film(url)
-    return review
-
-
-# =========================
-# LIKES (ROBUSTO)
-# =========================
-
-@st.cache_data
-def get_total_likes(review_url):
-    try:
-        if not review_url.endswith('/'):
-            review_url += '/'
-
-        url = review_url + "likes/"
-
-        response = requests.get(url, headers=HEADERS, timeout=10)
-
-        if response.status_code != 200:
-            return 0
-
-        soup = BeautifulSoup(response.text, "html.parser")
+        # tentativa 1: texto
         text = soup.get_text(" ", strip=True)
 
-        patterns = [
-            r'(\d+)\s+members',
-            r'(\d+)\s+likes',
-            r'Liked by\s+(\d+)'
-        ]
+        match = re.search(r'(\d+)', text)
+        if match:
+            value = int(match.group(1))
+            if value < 10000:
+                return value, "regex"
 
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match:
-                return int(match.group(1))
-
-        # fallback: contar usuários visíveis
+        # tentativa 2: contar usuários
         users = soup.select("li.poster-container")
         if users:
-            return len(users)
+            return len(users), "count"
 
-        return 0
+        return 0, "not_found"
 
     except:
-        return 0
+        return 0, "exception"
 
 
 # =========================
-# LIKES DADOS
+# OUTROS DADOS
 # =========================
 
 @st.cache_data
-def get_likes_given(review_url):
-    try:
-        response = requests.get(review_url, headers=HEADERS, timeout=10)
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        liked_section = soup.select("section.liked-reviews li")
-
-        return len(liked_section)
-
-    except:
-        return 0
+def get_likes_given(soup):
+    liked = soup.select("section.liked-reviews li")
+    return len(liked)
 
 
-# =========================
-# TEMPO DE LEITURA
-# =========================
-
-@st.cache_data
-def get_reading_time(review_url):
-    try:
-        response = requests.get(review_url, headers=HEADERS, timeout=10)
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        review_text = soup.select_one(".review-body")
-
-        if not review_text:
-            return 0
-
-        words = len(review_text.get_text().split())
-
-        return round(words / 200, 1)
-
-    except:
-        return 0
+def get_reading_time(review_element):
+    words = len(review_element.get_text().split())
+    return round(words / 200, 1)
 
 
-# =========================
-# USUÁRIO
-# =========================
-
-@st.cache_data
-def get_username(review_url):
-    try:
-        response = requests.get(review_url, headers=HEADERS, timeout=10)
-
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        user = soup.select_one("a.name")
-
-        if user:
-            return user.get_text().strip()
-
-        return "Desconhecido"
-
-    except:
-        return "Desconhecido"
+def get_username(soup):
+    user = soup.select_one("a.name")
+    return user.get_text().strip() if user else "Desconhecido"
 
 
-# =========================
-# SCORE DE LIKE BAIT (NOVO)
-# =========================
-
-def calculate_like_bait_score(recebidos, dados):
+def calculate_score(recebidos, dados):
     if dados == 0:
         return 0
-
     return round(recebidos / dados, 2)
 
 
@@ -175,15 +121,9 @@ def calculate_like_bait_score(recebidos, dados):
 # UI
 # =========================
 
-st.sidebar.title("Menu")
-opcao = st.sidebar.selectbox(
-    "Escolha a análise",
-    ["Análise de Like Bait"]
-)
-
 st.title("📊 Letterboxd Analytics")
 
-url = st.text_input("Cole a URL (review ou film):")
+url = st.text_input("Cole a URL do Letterboxd:")
 
 if st.button("Analisar"):
 
@@ -191,30 +131,44 @@ if st.button("Analisar"):
         st.warning("Insira uma URL válida")
         st.stop()
 
+    st.info("Carregando página...")
+
+    soup = get_soup(url)
+
     # =========================
-    # RESOLVER REVIEW
+    # DETECTAR REVIEW
     # =========================
 
-    st.info("Detectando review automaticamente...")
+    review_element, selector_used = get_review_element(soup)
 
-    review_url = resolve_review_url(url)
+    if not review_element:
+        st.error("❌ Não foi possível encontrar conteúdo de review nessa página")
+        
+        if DEBUG:
+            st.write("HTML parcial:")
+            st.code(str(soup)[:2000])
 
-    if not review_url:
-        st.error("Esse conteúdo não possui reviews disponíveis")
         st.stop()
 
-    st.success("Review encontrado")
+    st.success(f"✅ Review detectado ({selector_used})")
 
     # =========================
-    # COLETA DE DADOS
+    # EXTRAIR DADOS
     # =========================
 
-    likes_recebidos = get_total_likes(review_url)
-    likes_dados = get_likes_given(review_url)
-    tempo_leitura = get_reading_time(review_url)
-    usuario = get_username(review_url)
+    likes_recebidos, metodo = get_total_likes(url)
+    likes_dados = get_likes_given(soup)
+    tempo = get_reading_time(review_element)
+    usuario = get_username(soup)
+    score = calculate_score(likes_recebidos, likes_dados)
 
-    score = calculate_like_bait_score(likes_recebidos, likes_dados)
+    # =========================
+    # DEBUG INFO
+    # =========================
+
+    if DEBUG:
+        st.sidebar.write("Método likes:", metodo)
+        st.sidebar.write("Likes recebidos:", likes_recebidos)
 
     # =========================
     # MÉTRICAS
@@ -222,9 +176,9 @@ if st.button("Analisar"):
 
     col1, col2, col3, col4 = st.columns(4)
 
-    col1.metric("Like Review", likes_recebidos)
-    col2.metric(f"Likes dados por {usuario}", likes_dados)
-    col3.metric("Tempo de leitura (min)", tempo_leitura)
+    col1.metric("Likes recebidos", likes_recebidos)
+    col2.metric(f"Likes dados ({usuario})", likes_dados)
+    col3.metric("Tempo leitura (min)", tempo)
     col4.metric("Like Bait Score", score)
 
     # =========================
@@ -235,33 +189,22 @@ if st.button("Analisar"):
 
     fig = go.Figure()
 
-    fig.add_trace(go.Bar(
-        x=["Recebidos"],
-        y=[likes_recebidos],
-        name="Recebidos"
-    ))
+    fig.add_trace(go.Bar(x=["Recebidos"], y=[likes_recebidos]))
+    fig.add_trace(go.Bar(x=["Dados"], y=[likes_dados]))
 
-    fig.add_trace(go.Bar(
-        x=["Dados"],
-        y=[likes_dados],
-        name="Dados"
-    ))
-
-    fig.update_layout(
-        template="plotly_dark"
-    )
+    fig.update_layout(template="plotly_dark")
 
     st.plotly_chart(fig, use_container_width=True)
 
     # =========================
-    # INTERPRETAÇÃO (INSIGHT)
+    # INSIGHT
     # =========================
 
     st.subheader("🧠 Interpretação")
 
     if score > 5:
-        st.success("Alto potencial de Like Bait")
+        st.success("🔥 Forte sinal de Like Bait")
     elif score > 1:
-        st.info("Engajamento equilibrado")
+        st.info("📈 Engajamento equilibrado")
     else:
-        st.warning("Baixo retorno de likes")
+        st.warning("⚠️ Baixo retorno de likes")
