@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 import plotly.graph_objects as go
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
 
@@ -25,16 +27,11 @@ def get_soup(html):
 
 
 # =========================
-# PARSING
+# REVIEW
 # =========================
 
 def get_review_element(soup):
-    selectors = [
-        ".review-body",
-        ".body-text",
-        ".review",
-        ".truncate"
-    ]
+    selectors = [".review-body", ".body-text", ".review", ".truncate"]
 
     for selector in selectors:
         el = soup.select_one(selector)
@@ -49,56 +46,60 @@ def get_username(soup):
     return user.get_text().strip() if user else "Desconhecido"
 
 
-def get_likes_given(soup):
-    liked = soup.select("section.liked-reviews li")
-    return len(liked)
+def get_likes_given_elements(soup):
+    return soup.select("section.liked-reviews li")
 
 
 # =========================
-# ANÁLISE DE TEXTO
+# WORD CLOUD
 # =========================
 
-def analyze_text(review_element):
-    text = review_element.get_text()
+def generate_wordcloud(text):
+    wc = WordCloud(
+        width=800,
+        height=400,
+        background_color="black"
+    ).generate(text)
 
-    words = text.split()
-    word_count = len(words)
+    fig, ax = plt.subplots()
+    ax.imshow(wc, interpolation="bilinear")
+    ax.axis("off")
 
-    sentences = text.count('.') + text.count('!') + text.count('?')
-    sentences = max(sentences, 1)
-
-    avg_words_per_sentence = round(word_count / sentences, 1)
-
-    reading_time = round(word_count / 200, 1)
-
-    return {
-        "word_count": word_count,
-        "sentences": sentences,
-        "avg_sentence": avg_words_per_sentence,
-        "reading_time": reading_time
-    }
+    return fig
 
 
 # =========================
-# CLASSIFICAÇÃO DO REVIEW
+# EXTRAIR ESTRELAS
 # =========================
 
-def classify_review(word_count):
-    if word_count < 80:
-        return "Curto"
-    elif word_count < 250:
-        return "Médio"
-    else:
-        return "Longo"
+def extract_star_distribution(liked_elements):
+    distribution = {1:0, 2:0, 3:0, 4:0, 5:0}
+
+    for item in liked_elements:
+        classes = item.get("class", [])
+
+        for c in classes:
+            if "rated-" in c:
+                try:
+                    rating = int(c.replace("rated-", ""))
+                    
+                    # converter escala (ex: 80 → 4 estrelas)
+                    stars = rating // 20
+                    
+                    if stars in distribution:
+                        distribution[stars] += 1
+
+                except:
+                    pass
+
+    return distribution
 
 
 # =========================
 # UI
 # =========================
 
-st.title("📊 Letterboxd Review Analyzer")
-
-DEBUG = st.sidebar.checkbox("Modo Debug")
+st.title("📊 Letterboxd Analyzer")
 
 url = st.text_input("Cole a URL do Letterboxd:")
 
@@ -107,8 +108,6 @@ if st.button("Analisar"):
     if not url:
         st.warning("Insira uma URL válida")
         st.stop()
-
-    st.info("Carregando página...")
 
     html = fetch_html(url)
     soup = get_soup(html)
@@ -120,67 +119,37 @@ if st.button("Analisar"):
         st.stop()
 
     usuario = get_username(soup)
-    likes_dados = get_likes_given(soup)
-
-    analysis = analyze_text(review_element)
-
-    tipo = classify_review(analysis["word_count"])
+    liked_elements = get_likes_given_elements(soup)
 
     # =========================
-    # MÉTRICAS
+    # WORD CLOUD
     # =========================
 
-    col1, col2, col3, col4 = st.columns(4)
+    st.subheader("☁️ Nuvem de palavras")
 
-    col1.metric("Palavras", analysis["word_count"])
-    col2.metric("Tempo leitura (min)", analysis["reading_time"])
-    col3.metric("Likes dados", likes_dados)
-    col4.metric("Tipo de review", tipo)
+    text = review_element.get_text()
+    fig_wc = generate_wordcloud(text)
 
-    # =========================
-    # DETALHES
-    # =========================
-
-    st.subheader("📋 Estrutura do texto")
-
-    st.write(f"**Sentenças estimadas:** {analysis['sentences']}")
-    st.write(f"**Média de palavras por sentença:** {analysis['avg_sentence']}")
+    st.pyplot(fig_wc)
 
     # =========================
-    # GRÁFICO
+    # GRÁFICO DE ESTRELAS
     # =========================
 
-    st.subheader("📊 Distribuição")
+    st.subheader("⭐ Distribuição de avaliações dos likes")
+
+    distribution = extract_star_distribution(liked_elements)
+
+    stars = list(distribution.keys())
+    values = list(distribution.values())
 
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
-        x=["Palavras", "Sentenças"],
-        y=[analysis["word_count"], analysis["sentences"]]
+        x=[f"{s}⭐" for s in stars],
+        y=values
     ))
 
     fig.update_layout(template="plotly_dark")
 
     st.plotly_chart(fig, use_container_width=True)
-
-    # =========================
-    # INSIGHT SIMPLES (SEGURO)
-    # =========================
-
-    st.subheader("🧠 Leitura do review")
-
-    if tipo == "Longo":
-        st.success("Review detalhado, com maior profundidade")
-    elif tipo == "Médio":
-        st.info("Review equilibrado")
-    else:
-        st.warning("Review curto, mais direto")
-
-    # =========================
-    # DEBUG
-    # =========================
-
-    if DEBUG:
-        st.sidebar.write("Usuário:", usuario)
-        st.sidebar.write("Texto (preview):")
-        st.sidebar.write(review_element.get_text()[:300])
