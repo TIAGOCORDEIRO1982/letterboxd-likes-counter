@@ -6,26 +6,51 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
+
 # =========================
-# EXTRAIR REVIEW SE FOR FILM
+# EXTRAIR REVIEW DO FILM
 # =========================
 
 @st.cache_data
-def extract_review_url(film_url):
+def extract_review_from_film(film_url):
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(film_url, headers=headers, timeout=10)
+        if not film_url.endswith('/'):
+            film_url += '/'
+
+        reviews_url = film_url + "reviews/"
+
+        response = requests.get(reviews_url, headers=HEADERS, timeout=10)
+
+        if response.status_code != 200:
+            return None
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        review_link = soup.select_one('a[href*="/review/"]')
+        review = soup.select_one('a[href*="/review/"]')
 
-        if review_link:
-            return "https://letterboxd.com" + review_link["href"]
+        if review:
+            return "https://letterboxd.com" + review["href"]
 
         return None
+
     except:
         return None
+
+
+# =========================
+# VALIDAR / NORMALIZAR URL
+# =========================
+
+@st.cache_data
+def resolve_review_url(url):
+    if "/review/" in url:
+        return url
+
+    review = extract_review_from_film(url)
+    return review
 
 
 # =========================
@@ -40,8 +65,7 @@ def get_total_likes(review_url):
 
         url = review_url + "likes/"
 
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=HEADERS, timeout=10)
 
         if response.status_code != 200:
             return 0
@@ -60,7 +84,7 @@ def get_total_likes(review_url):
             if match:
                 return int(match.group(1))
 
-        # fallback: contar usuários
+        # fallback: contar usuários visíveis
         users = soup.select("li.poster-container")
         if users:
             return len(users)
@@ -78,8 +102,7 @@ def get_total_likes(review_url):
 @st.cache_data
 def get_likes_given(review_url):
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(review_url, headers=headers, timeout=10)
+        response = requests.get(review_url, headers=HEADERS, timeout=10)
 
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -98,8 +121,7 @@ def get_likes_given(review_url):
 @st.cache_data
 def get_reading_time(review_url):
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(review_url, headers=headers, timeout=10)
+        response = requests.get(review_url, headers=HEADERS, timeout=10)
 
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -123,8 +145,7 @@ def get_reading_time(review_url):
 @st.cache_data
 def get_username(review_url):
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response = requests.get(review_url, headers=headers, timeout=10)
+        response = requests.get(review_url, headers=HEADERS, timeout=10)
 
         soup = BeautifulSoup(response.text, "html.parser")
 
@@ -137,6 +158,17 @@ def get_username(review_url):
 
     except:
         return "Desconhecido"
+
+
+# =========================
+# SCORE DE LIKE BAIT (NOVO)
+# =========================
+
+def calculate_like_bait_score(recebidos, dados):
+    if dados == 0:
+        return 0
+
+    return round(recebidos / dados, 2)
 
 
 # =========================
@@ -160,39 +192,40 @@ if st.button("Analisar"):
         st.stop()
 
     # =========================
-    # GARANTIR QUE É REVIEW
+    # RESOLVER REVIEW
     # =========================
 
-    if "/review/" not in url:
-        st.info("Detectando review automaticamente...")
+    st.info("Detectando review automaticamente...")
 
-        new_url = extract_review_url(url)
+    review_url = resolve_review_url(url)
 
-        if new_url:
-            url = new_url
-            st.success("Review encontrado automaticamente")
-        else:
-            st.error("Nenhum review encontrado nessa página")
-            st.stop()
+    if not review_url:
+        st.error("Esse conteúdo não possui reviews disponíveis")
+        st.stop()
+
+    st.success("Review encontrado")
 
     # =========================
     # COLETA DE DADOS
     # =========================
 
-    likes_recebidos = get_total_likes(url)
-    likes_dados = get_likes_given(url)
-    tempo_leitura = get_reading_time(url)
-    usuario = get_username(url)
+    likes_recebidos = get_total_likes(review_url)
+    likes_dados = get_likes_given(review_url)
+    tempo_leitura = get_reading_time(review_url)
+    usuario = get_username(review_url)
+
+    score = calculate_like_bait_score(likes_recebidos, likes_dados)
 
     # =========================
     # MÉTRICAS
     # =========================
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     col1.metric("Like Review", likes_recebidos)
     col2.metric(f"Likes dados por {usuario}", likes_dados)
     col3.metric("Tempo de leitura (min)", tempo_leitura)
+    col4.metric("Like Bait Score", score)
 
     # =========================
     # GRÁFICO
@@ -203,20 +236,32 @@ if st.button("Analisar"):
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
-        x=["Review"],
+        x=["Recebidos"],
         y=[likes_recebidos],
         name="Recebidos"
     ))
 
     fig.add_trace(go.Bar(
-        x=["Review"],
+        x=["Dados"],
         y=[likes_dados],
         name="Dados"
     ))
 
     fig.update_layout(
-        barmode='group',
         template="plotly_dark"
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
+    # =========================
+    # INTERPRETAÇÃO (INSIGHT)
+    # =========================
+
+    st.subheader("🧠 Interpretação")
+
+    if score > 5:
+        st.success("Alto potencial de Like Bait")
+    elif score > 1:
+        st.info("Engajamento equilibrado")
+    else:
+        st.warning("Baixo retorno de likes")
