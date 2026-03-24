@@ -69,10 +69,6 @@ def get_likes_given(soup):
     return len(soup.select("section.liked-reviews li"))
 
 
-def get_liked_elements(soup):
-    return soup.select("section.liked-reviews li")
-
-
 # =========================
 # TEXTO
 # =========================
@@ -98,7 +94,7 @@ def get_top_words(text, n=12):
 
 
 # =========================
-# BUBBLE CHART REFINADO
+# BUBBLE CHART MELHORADO
 # =========================
 
 def create_bubble_chart(word_counts):
@@ -106,14 +102,18 @@ def create_bubble_chart(word_counts):
     values = [v for _, v in word_counts]
 
     max_val = max(values)
-    sizes = [40 + (v / max_val) * 120 for v in values]
 
-    x = [0]
-    y = [0]
+    # tamanho proporcional mais equilibrado
+    sizes = [50 + (v / max_val) * 100 for v in values]
 
-    for i in range(1, len(words)):
-        angle = i * (2 * math.pi / (len(words) - 1))
-        radius = 1.5 + (i % 3) * 0.5
+    x = []
+    y = []
+
+    # layout espiral compacta (mais próximo)
+    for i in range(len(words)):
+        angle = i * 0.6
+        radius = 0.5 + i * 0.15
+
         x.append(math.cos(angle) * radius)
         y.append(math.sin(angle) * radius)
 
@@ -124,13 +124,16 @@ def create_bubble_chart(word_counts):
         "#FB923C", "#C084FC", "#22D3EE"
     ]
 
+    # texto com contagem
+    labels = [f"{w}<br>{v}x" for w, v in word_counts]
+
     fig = go.Figure()
 
     fig.add_trace(go.Scatter(
         x=x,
         y=y,
         mode='markers+text',
-        text=words,
+        text=labels,
         textposition="middle center",
         marker=dict(
             size=sizes,
@@ -138,7 +141,7 @@ def create_bubble_chart(word_counts):
             line=dict(width=0)
         ),
         textfont=dict(
-            size=14,
+            size=13,
             color="white"
         ),
         hoverinfo='text'
@@ -190,30 +193,7 @@ def classify_review(word_count):
 
 
 # =========================
-# ESTRELAS
-# =========================
-
-def extract_star_distribution(liked_elements):
-    dist = {1:0,2:0,3:0,4:0,5:0}
-
-    for item in liked_elements:
-        classes = item.get("class", [])
-
-        for c in classes:
-            if "rated-" in c:
-                try:
-                    rating = int(c.replace("rated-", ""))
-                    stars = rating // 20
-                    if stars in dist:
-                        dist[stars] += 1
-                except:
-                    pass
-
-    return dist
-
-
-# =========================
-# PÁGINA: ANÁLISE DE REVIEW
+# UI
 # =========================
 
 if opcao == "Análise de Review":
@@ -239,7 +219,6 @@ if opcao == "Análise de Review":
 
         usuario = get_username(soup)
         likes_dados = get_likes_given(soup)
-        liked_elements = get_liked_elements(soup)
 
         analysis = analyze_text(review_element)
         tipo = classify_review(analysis["word_count"])
@@ -275,29 +254,6 @@ if opcao == "Análise de Review":
 
         st.plotly_chart(fig_wc, use_container_width=True)
 
-        # =========================
-        # ESTRELAS
-        # =========================
-
-        st.subheader("⭐ Distribuição de avaliações dos likes")
-
-        dist = extract_star_distribution(liked_elements)
-
-        fig = go.Figure()
-
-        fig.add_trace(go.Bar(
-            x=[f"{k}⭐" for k in dist.keys()],
-            y=list(dist.values())
-        ))
-
-        fig.update_layout(template="plotly_dark")
-
-        st.plotly_chart(fig, use_container_width=True)
-
-
-# =========================
-# PLACEHOLDER FUTURO
-# =========================
 
 elif opcao == "Em breve":
     st.title("🚧 Em breve")
