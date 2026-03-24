@@ -5,6 +5,7 @@ import plotly.graph_objects as go
 from collections import Counter
 import re
 import math
+import random
 
 st.set_page_config(layout="wide")
 
@@ -73,12 +74,12 @@ def get_top_words(text, n=12):
     return Counter(clean_text(text)).most_common(n)
 
 # =========================
-# BUBBLE CHART COM REGRAS
+# FORCE LAYOUT (CORRIGIDO)
 # =========================
 
 def create_bubble_chart(word_counts):
 
-    # ordenar por frequência (maior primeiro)
+    # ordenar por tamanho
     word_counts = sorted(word_counts, key=lambda x: x[1], reverse=True)
 
     words = [w for w, _ in word_counts]
@@ -89,52 +90,41 @@ def create_bubble_chart(word_counts):
     sizes = [60 + (v / max_val) * 120 for v in values]
     radii = [s / 2 for s in sizes]
 
-    gap = 5  # distância mínima entre bolhas
+    n = len(words)
 
-    positions = []
+    # posições iniciais (todas no centro)
+    x = [random.uniform(-0.1, 0.1) for _ in range(n)]
+    y = [random.uniform(-0.1, 0.1) for _ in range(n)]
 
-    # 1. PRIMEIRA BOLHA NO CENTRO
-    positions.append((0, 0))
+    gap = 5
 
-    # 2. DISTRIBUIR EM ANÉIS
-    for i in range(1, len(words)):
+    # simulação
+    for _ in range(200):
 
-        placed = False
-        angle_step = math.pi / 6
+        for i in range(n):
+            for j in range(i + 1, n):
 
-        for ring in range(1, 20):
-            radius_ring = ring * 1.2
+                dx = x[j] - x[i]
+                dy = y[j] - y[i]
+                dist = math.sqrt(dx*dx + dy*dy) + 0.001
 
-            for a in range(0, 360, int(math.degrees(angle_step))):
-                angle = math.radians(a)
+                min_dist = radii[i] + radii[j] + gap
 
-                x = math.cos(angle) * radius_ring
-                y = math.sin(angle) * radius_ring
+                if dist < min_dist:
+                    force = (min_dist - dist) / dist * 0.5
 
-                collision = False
+                    x[i] -= dx * force
+                    y[i] -= dy * force
+                    x[j] += dx * force
+                    y[j] += dy * force
 
-                for j, (px, py) in enumerate(positions):
-                    dist = math.sqrt((x - px)**2 + (y - py)**2)
+        # força de centralização
+        for i in range(1, n):  # mantém a maior fixa no centro
+            x[i] += (-x[i]) * 0.05
+            y[i] += (-y[i]) * 0.05
 
-                    min_dist = radii[i] + radii[j] + gap
-
-                    if dist < min_dist:
-                        collision = True
-                        break
-
-                if not collision:
-                    positions.append((x, y))
-                    placed = True
-                    break
-
-            if placed:
-                break
-
-        if not placed:
-            positions.append((x, y))
-
-    x = [p[0] for p in positions]
-    y = [p[1] for p in positions]
+    # maior bolha fixa
+    x[0], y[0] = 0, 0
 
     labels = [f"{w}<br>{v}x" for w, v in word_counts]
 
