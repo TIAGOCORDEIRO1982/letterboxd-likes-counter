@@ -1,13 +1,107 @@
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
-import plotly.graph_objects as go
 import re
+import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 
 # =========================
-# MENU
+# FUNÇÕES
+# =========================
+
+@st.cache_data
+def get_total_likes(review_url):
+    try:
+        if not review_url.endswith('/'):
+            review_url += '/'
+
+        url = review_url + "likes/"
+
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            return 0
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        text = soup.get_text()
+
+        # padrão tipo "493 members"
+        match = re.search(r'(\d+)\s+members', text)
+
+        if match:
+            return int(match.group(1))
+
+        return 0
+
+    except:
+        return 0
+
+
+@st.cache_data
+def get_likes_given(review_url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(review_url, headers=headers)
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        liked_section = soup.select("section.liked-reviews li")
+
+        return len(liked_section)
+
+    except:
+        return 0
+
+
+@st.cache_data
+def get_reading_time(review_url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(review_url, headers=headers)
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        review_text = soup.select_one(".review-body")
+
+        if not review_text:
+            return 0
+
+        words = len(review_text.get_text().split())
+
+        # média: 200 palavras por minuto
+        return round(words / 200, 1)
+
+    except:
+        return 0
+
+
+@st.cache_data
+def get_username(review_url):
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(review_url, headers=headers)
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        user = soup.select_one("a.name")
+
+        if user:
+            return user.get_text().strip()
+
+        return "Desconhecido"
+
+    except:
+        return "Desconhecido"
+
+
+# =========================
+# UI
 # =========================
 
 st.sidebar.title("Menu")
@@ -20,130 +114,50 @@ st.title("📊 Letterboxd Analytics")
 
 url = st.text_input("Cole a URL do review:")
 
-# =========================
-# HELPERS
-# =========================
-
-def get_soup(url):
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-    try:
-        response = requests.get(url, headers=headers)
-        return BeautifulSoup(response.text, "lxml")
-    except Exception as e:
-        st.error(f"Erro ao acessar a URL: {e}")
-        return None
-
-
-def get_like_review(soup):
-    """
-    Extrai o número de likes do review baseado no texto 'Like review'.
-    """
-    texto = soup.get_text(" ", strip=True).lower()
-
-    match = re.search(r'like review\s+(\d[\d.,]*)', texto)
-
-    if match:
-        numero = match.group(1)
-        numero = numero.replace(",", "").replace(".", "")
-        return int(numero)
-
-    return 0
-
-
-def get_likes_dados(soup):
-    """
-    Likes que o usuário deu em outros reviews (visível na página do filme)
-    """
-    section = soup.select_one("section.liked-reviews")
-    if not section:
-        return 0
-    return len(section.select("li"))
-
-
-def get_user(soup):
-    el = soup.select_one("a.name")
-    return el.text.strip() if el else "Usuário"
-
-
-def get_texto(soup):
-    el = soup.select_one(".review .body-text")
-    return el.text.strip() if el else ""
-
-
-# =========================
-# EXECUÇÃO
-# =========================
-
 if st.button("Analisar"):
 
-    if not url:
-        st.warning("Cole uma URL válida")
-        st.stop()
+    if url:
+        likes_recebidos = get_total_likes(url)
+        likes_dados = get_likes_given(url)
+        tempo_leitura = get_reading_time(url)
+        usuario = get_username(url)
 
-    if "letterboxd.com" not in url:
-        st.error("Por favor, cole uma URL válida do Letterboxd.")
-        st.stop()
+        # =========================
+        # MÉTRICAS
+        # =========================
 
-    with st.spinner('Extraindo dados do Letterboxd...'):
-        soup = get_soup(url)
+        col1, col2, col3 = st.columns(3)
 
-        if soup:
-            like_review = get_like_review(soup)
-            likes_dados = get_likes_dados(soup)
-            usuario = get_user(soup)
-            texto = get_texto(soup)
+        col1.metric("Like Review", likes_recebidos)
+        col2.metric(f"Likes dados por {usuario}", likes_dados)
+        col3.metric("Tempo de leitura (min)", tempo_leitura)
 
-            palavras = len(texto.split())
-            tempo = round(palavras / 200, 1) if palavras else 0
+        # =========================
+        # GRÁFICO
+        # =========================
 
-            # =========================
-            # MÉTRICAS
-            # =========================
+        st.subheader("📊 Comparação")
 
-            col1, col2, col3 = st.columns(3)
+        fig = go.Figure()
 
-            col1.metric("Like Review", like_review)
-            col2.metric(f"Likes dados em reviews por '{usuario}'", likes_dados)
-            col3.metric("Tempo de leitura (min)", tempo)
+        fig.add_trace(go.Bar(
+            x=["Review"],
+            y=[likes_recebidos],
+            name="Recebidos"
+        ))
 
-            # =========================
-            # GRÁFICO ESTILO REFERÊNCIA
-            # =========================
+        fig.add_trace(go.Bar(
+            x=["Review"],
+            y=[likes_dados],
+            name="Dados"
+        ))
 
-            st.markdown("### 📊 Comparação")
+        fig.update_layout(
+            barmode='group',
+            template="plotly_dark"
+        )
 
-            fig = go.Figure()
+        st.plotly_chart(fig, use_container_width=True)
 
-            fig.add_trace(go.Bar(
-                x=["Review"],
-                y=[like_review],
-                name="Recebidos",
-                marker_color="#22c1dc"  # azul estilo moderno
-            ))
-
-            fig.add_trace(go.Bar(
-                x=["Review"],
-                y=[likes_dados],
-                name="Dados",
-                marker_color="#ff7a00"  # laranja estilo referência
-            ))
-
-            fig.update_layout(
-                barmode='group',
-                template="plotly_dark",
-                height=400,
-                margin=dict(l=20, r=20, t=40, b=20),
-                legend=dict(
-                    orientation="h",
-                    y=1.1,
-                    x=0.5,
-                    xanchor="center"
-                )
-            )
-
-            st.plotly_chart(fig, use_container_width=True)
-
-        else:
-            st.error("Não foi possível carregar a página.")
+    else:
+        st.warning("Insira uma URL válida")
