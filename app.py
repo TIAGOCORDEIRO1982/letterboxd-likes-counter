@@ -5,7 +5,6 @@ import plotly.graph_objects as go
 from collections import Counter
 import re
 import math
-import random
 
 st.set_page_config(layout="wide")
 
@@ -74,56 +73,68 @@ def get_top_words(text, n=12):
     return Counter(clean_text(text)).most_common(n)
 
 # =========================
-# CIRCLE PACKING (ANTI-COLISÃO)
-# =========================
-
-def pack_circles(sizes):
-    circles = []
-
-    for size in sizes:
-        r = size / 2
-        placed = False
-
-        for _ in range(2000):
-            angle = random.random() * 2 * math.pi
-            radius = random.random() * 3
-
-            x = math.cos(angle) * radius
-            y = math.sin(angle) * radius
-
-            collision = False
-
-            for cx, cy, cr in circles:
-                dist = math.sqrt((x - cx)**2 + (y - cy)**2)
-                if dist < (r + cr):
-                    collision = True
-                    break
-
-            if not collision:
-                circles.append((x, y, r))
-                placed = True
-                break
-
-        if not placed:
-            circles.append((x, y, r))
-
-    return circles
-
-# =========================
-# BUBBLE CHART REAL
+# BUBBLE CHART COM REGRAS
 # =========================
 
 def create_bubble_chart(word_counts):
+
+    # ordenar por frequência (maior primeiro)
+    word_counts = sorted(word_counts, key=lambda x: x[1], reverse=True)
+
     words = [w for w, _ in word_counts]
     values = [v for _, v in word_counts]
 
     max_val = max(values)
-    sizes = [40 + (v / max_val) * 120 for v in values]
 
-    circles = pack_circles(sizes)
+    sizes = [60 + (v / max_val) * 120 for v in values]
+    radii = [s / 2 for s in sizes]
 
-    x = [c[0] for c in circles]
-    y = [c[1] for c in circles]
+    gap = 5  # distância mínima entre bolhas
+
+    positions = []
+
+    # 1. PRIMEIRA BOLHA NO CENTRO
+    positions.append((0, 0))
+
+    # 2. DISTRIBUIR EM ANÉIS
+    for i in range(1, len(words)):
+
+        placed = False
+        angle_step = math.pi / 6
+
+        for ring in range(1, 20):
+            radius_ring = ring * 1.2
+
+            for a in range(0, 360, int(math.degrees(angle_step))):
+                angle = math.radians(a)
+
+                x = math.cos(angle) * radius_ring
+                y = math.sin(angle) * radius_ring
+
+                collision = False
+
+                for j, (px, py) in enumerate(positions):
+                    dist = math.sqrt((x - px)**2 + (y - py)**2)
+
+                    min_dist = radii[i] + radii[j] + gap
+
+                    if dist < min_dist:
+                        collision = True
+                        break
+
+                if not collision:
+                    positions.append((x, y))
+                    placed = True
+                    break
+
+            if placed:
+                break
+
+        if not placed:
+            positions.append((x, y))
+
+    x = [p[0] for p in positions]
+    y = [p[1] for p in positions]
 
     labels = [f"{w}<br>{v}x" for w, v in word_counts]
 
