@@ -5,12 +5,9 @@ import plotly.graph_objects as go
 from collections import Counter
 import re
 import math
+import random
 
 st.set_page_config(layout="wide")
-
-# =========================
-# CONFIG
-# =========================
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0",
@@ -25,10 +22,7 @@ st.sidebar.title("Menu")
 
 opcao = st.sidebar.selectbox(
     "Escolha a análise",
-    [
-        "Análise de Review",
-        "Em breve"
-    ]
+    ["Análise de Review", "Em breve"]
 )
 
 # =========================
@@ -37,13 +31,10 @@ opcao = st.sidebar.selectbox(
 
 @st.cache_data
 def fetch_html(url):
-    response = requests.get(url, headers=HEADERS, timeout=10)
-    return response.text
-
+    return requests.get(url, headers=HEADERS).text
 
 def get_soup(html):
     return BeautifulSoup(html, "html.parser")
-
 
 # =========================
 # PARSING
@@ -51,23 +42,18 @@ def get_soup(html):
 
 def get_review_element(soup):
     selectors = [".review-body", ".body-text", ".review", ".truncate"]
-
-    for selector in selectors:
-        el = soup.select_one(selector)
+    for s in selectors:
+        el = soup.select_one(s)
         if el and len(el.get_text(strip=True)) > 80:
             return el
-
     return None
-
 
 def get_username(soup):
     user = soup.select_one("a.name")
     return user.get_text().strip() if user else "Desconhecido"
 
-
 def get_likes_given(soup):
     return len(soup.select("section.liked-reviews li"))
-
 
 # =========================
 # TEXTO
@@ -82,19 +68,49 @@ def clean_text(text):
         "com","de","da","do","e","o","a","que","um","uma","em"
     }
 
-    words = [w for w in text.split() if w not in stopwords and len(w) > 3]
-
-    return words
-
+    return [w for w in text.split() if w not in stopwords and len(w) > 3]
 
 def get_top_words(text, n=12):
-    words = clean_text(text)
-    counts = Counter(words)
-    return counts.most_common(n)
-
+    return Counter(clean_text(text)).most_common(n)
 
 # =========================
-# BUBBLE CHART MELHORADO
+# CIRCLE PACKING (ANTI-COLISÃO)
+# =========================
+
+def pack_circles(sizes):
+    circles = []
+
+    for size in sizes:
+        r = size / 2
+        placed = False
+
+        for _ in range(2000):
+            angle = random.random() * 2 * math.pi
+            radius = random.random() * 3
+
+            x = math.cos(angle) * radius
+            y = math.sin(angle) * radius
+
+            collision = False
+
+            for cx, cy, cr in circles:
+                dist = math.sqrt((x - cx)**2 + (y - cy)**2)
+                if dist < (r + cr):
+                    collision = True
+                    break
+
+            if not collision:
+                circles.append((x, y, r))
+                placed = True
+                break
+
+        if not placed:
+            circles.append((x, y, r))
+
+    return circles
+
+# =========================
+# BUBBLE CHART REAL
 # =========================
 
 def create_bubble_chart(word_counts):
@@ -102,30 +118,20 @@ def create_bubble_chart(word_counts):
     values = [v for _, v in word_counts]
 
     max_val = max(values)
+    sizes = [40 + (v / max_val) * 120 for v in values]
 
-    # tamanho proporcional mais equilibrado
-    sizes = [50 + (v / max_val) * 100 for v in values]
+    circles = pack_circles(sizes)
 
-    x = []
-    y = []
+    x = [c[0] for c in circles]
+    y = [c[1] for c in circles]
 
-    # layout espiral compacta (mais próximo)
-    for i in range(len(words)):
-        angle = i * 0.6
-        radius = 0.5 + i * 0.15
-
-        x.append(math.cos(angle) * radius)
-        y.append(math.sin(angle) * radius)
+    labels = [f"{w}<br>{v}x" for w, v in word_counts]
 
     colors = [
-        "#A78BFA", "#60A5FA", "#34D399",
-        "#FBBF24", "#F87171", "#F472B6",
-        "#38BDF8", "#818CF8", "#4ADE80",
-        "#FB923C", "#C084FC", "#22D3EE"
+        "#A78BFA","#60A5FA","#34D399","#FBBF24",
+        "#F87171","#F472B6","#38BDF8","#818CF8",
+        "#4ADE80","#FB923C","#C084FC","#22D3EE"
     ]
-
-    # texto com contagem
-    labels = [f"{w}<br>{v}x" for w, v in word_counts]
 
     fig = go.Figure()
 
@@ -140,11 +146,8 @@ def create_bubble_chart(word_counts):
             color=colors[:len(words)],
             line=dict(width=0)
         ),
-        textfont=dict(
-            size=13,
-            color="white"
-        ),
-        hoverinfo='text'
+        textfont=dict(size=13, color="white"),
+        hoverinfo="text"
     ))
 
     fig.update_layout(
@@ -158,39 +161,29 @@ def create_bubble_chart(word_counts):
 
     return fig
 
-
 # =========================
-# ANÁLISE DE TEXTO
+# ANÁLISE
 # =========================
 
-def analyze_text(review_element):
-    text = review_element.get_text()
-
+def analyze_text(el):
+    text = el.get_text()
     words = text.split()
-    word_count = len(words)
 
     sentences = text.count('.') + text.count('!') + text.count('?')
     sentences = max(sentences, 1)
 
-    avg_words = round(word_count / sentences, 1)
-    reading_time = round(word_count / 200, 1)
-
     return {
         "text": text,
-        "word_count": word_count,
+        "word_count": len(words),
         "sentences": sentences,
-        "avg_sentence": avg_words,
-        "reading_time": reading_time
+        "avg_sentence": round(len(words)/sentences,1),
+        "reading_time": round(len(words)/200,1)
     }
 
-
-def classify_review(word_count):
-    if word_count < 80:
-        return "Curto"
-    elif word_count < 250:
-        return "Médio"
+def classify_review(n):
+    if n < 80: return "Curto"
+    elif n < 250: return "Médio"
     return "Longo"
-
 
 # =========================
 # UI
@@ -208,53 +201,36 @@ if opcao == "Análise de Review":
             st.warning("Insira uma URL válida")
             st.stop()
 
-        html = fetch_html(url)
-        soup = get_soup(html)
+        soup = get_soup(fetch_html(url))
+        review = get_review_element(soup)
 
-        review_element = get_review_element(soup)
-
-        if not review_element:
-            st.error("❌ Review não encontrado")
+        if not review:
+            st.error("Review não encontrado")
             st.stop()
 
         usuario = get_username(soup)
-        likes_dados = get_likes_given(soup)
+        likes = get_likes_given(soup)
 
-        analysis = analyze_text(review_element)
-        tipo = classify_review(analysis["word_count"])
-
-        # =========================
-        # MÉTRICAS
-        # =========================
+        data = analyze_text(review)
+        tipo = classify_review(data["word_count"])
 
         col1, col2, col3, col4 = st.columns(4)
 
-        col1.metric("Palavras", analysis["word_count"])
-        col2.metric("Tempo leitura", analysis["reading_time"])
-        col3.metric("Likes dados", likes_dados)
+        col1.metric("Palavras", data["word_count"])
+        col2.metric("Tempo leitura", data["reading_time"])
+        col3.metric("Likes dados", likes)
         col4.metric("Tipo", tipo)
 
-        # =========================
-        # TEXTO
-        # =========================
-
         st.subheader("📋 Estrutura do texto")
-
-        st.write(f"Sentenças: {analysis['sentences']}")
-        st.write(f"Média por frase: {analysis['avg_sentence']}")
-
-        # =========================
-        # BUBBLE WORD CLOUD
-        # =========================
+        st.write(f"Sentenças: {data['sentences']}")
+        st.write(f"Média por frase: {data['avg_sentence']}")
 
         st.subheader("☁️ Nuvem de palavras")
 
-        top_words = get_top_words(analysis["text"])
-        fig_wc = create_bubble_chart(top_words)
+        top_words = get_top_words(data["text"])
+        fig = create_bubble_chart(top_words)
 
-        st.plotly_chart(fig_wc, use_container_width=True)
-
+        st.plotly_chart(fig, use_container_width=True)
 
 elif opcao == "Em breve":
     st.title("🚧 Em breve")
-    st.write("Novas análises serão adicionadas aqui.")
